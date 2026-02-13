@@ -29,3 +29,4 @@
 - [AI settings sync (WebDAV) tech design](./ai_settings_sync_webdav.md)
 - [Backup/restore (Files/iCloud) tech design](./backup_restore_icloud.md)
 - [Test plan](./test_plan.md)
+- [Implementation plan](./implementation_plan.md)
