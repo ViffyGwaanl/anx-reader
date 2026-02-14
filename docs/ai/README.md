@@ -37,3 +37,6 @@
 - [Backup/restore (Files/iCloud) tech design](./backup_restore_icloud.md)
 - [Test plan](./test_plan.md)
 - [Implementation plan](./implementation_plan.md)
+- [PR-6 draft](./pr_pr6_webdav_ai_settings.md)
+- [PR-7 draft](./pr_pr7_backup_v4_encrypted_keys.md)
+- [Release/Migration notes](./release_notes_migration_ai_sync_backup.md)
