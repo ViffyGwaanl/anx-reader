@@ -34,15 +34,19 @@
   - 触觉反馈：`HapticFeedback.selectionClick()`（drag start）
 - 结束拖拽持久化：`Prefs().aiPanelWidth/_Height`
 
-### 2.2 Bottom sheet resizable
+### 2.2 Bottom sheet (fixed large size)
+
+> 早期实现为可拖拽调整高度的 `DraggableScrollableSheet`（见 PR-2），但在真机触摸下“难以精确控制”。
+> PR-8 将其收敛为“固定大尺寸 + 系统下滑关闭”的稳定交互。
 
 - 文件：
   - `lib/widgets/ai/ai_chat_bottom_sheet.dart`
   - `lib/page/reading_page.dart`（showAiChat 小屏入口）
-- 实现：`DraggableScrollableSheet`
-  - `snapSizes`: 0.35 / 0.6 / 0.9 / 0.95
-  - `_minSize=0.35`, `_maxSize=0.95`
-- Prefs：`aiSheetInitialSize`
+- 实现：固定高度 `SizedBox(height: screenHeight * 0.95)`
+  - 不提供“按住调大小”的交互
+  - 依赖 `showModalBottomSheet` 默认的 **下滑关闭**
+- Prefs：
+  - 仍保留 `aiSheetInitialSize`（历史兼容；当前 fixed-size 版本不再使用）
 
 ### 2.3 iPad panel mode + dock side
 
@@ -56,7 +60,8 @@
 ### 2.4 AI chat font scale
 
 - Prefs：`aiChatFontScale`（默认 1.0）
-- UI：AI Chat AppBar 增加 `Icons.text_fields` → slider
+- UI：AI Chat AppBar 增加 `Icons.text_fields`
+  - PR-8：使用 `AlertDialog` 承载 slider（避免在 bottom sheet 内再开 bottom sheet 导致自动消失）
 - 应用：`MediaQuery.copyWith(textScaler: TextScaler.linear(scale))`
 
 ### 2.5 Configurable input quick prompts
@@ -66,6 +71,16 @@
 - UI editor：`lib/page/settings_page/ai_quick_prompts_editor.dart`
 
 ## 3. UX Specs
+
+### 3.0 Quick entry gesture (bottom sheet mode)
+
+- 目标：在 bottom sheet 模式下，无需先唤出菜单再点击 AI。
+- 交互：从阅读页面**中下部区域**向上滑动即可打开 AI bottom sheet。
+- 设计约束：
+  - 只在 bottom sheet 模式启用（小屏 iPhone / iPad 设置为 bottomSheet）
+  - 手势捕获区域建议为屏幕宽度 50%（中间），高度约 120–160px（靠底部），避免干扰阅读/翻页
+  - 触发阈值：上滑位移 ~40px 或上滑速度阈值（例如 -500 px/s）
+
 
 ### 3.1 iPad Dock Resize
 
@@ -129,8 +144,9 @@
   - dock-left drawer edge swipe disabled; TOC button works
   - switching `aiPadPanelMode` changes behavior
 - iPhone (<600 width):
-  - bottom sheet draggable, snap points work
-  - dismiss/reopen remembers size
+  - bottom sheet opens at large fixed height (~95%)
+  - swipe down dismiss works
+  - swipe up from lower-middle area opens AI (no menu tap needed)
 - AI chat:
   - font scale slider affects markdown + input
   - custom quick prompts appear in input row

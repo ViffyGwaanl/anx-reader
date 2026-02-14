@@ -14,11 +14,14 @@
 - [ ] Width/height persists after leaving/returning reading page
 - [ ] Clamp works (min/max)
 
-## PR-2 Bottom Sheet Resizable
+## PR-2 Bottom Sheet (legacy resizable)
 
-- [ ] Drag handle changes height
-- [ ] Snap points: 0.35/0.6/0.9/0.95
-- [ ] Reopen remembers last size
+> 注意：PR-8 已将 bottom sheet 收敛为 fixed large height（取消难用的拖拽调大小）。
+> 若需要回归验证旧实现，可在 PR-2 分支单独验证。
+
+- [ ] （可选）Drag handle changes height
+- [ ] （可选）Snap points: 0.35/0.6/0.9/0.95
+- [ ] （可选）Reopen remembers last size
 
 ## PR-3 iPad Panel Mode + Dock Side
 
@@ -33,6 +36,7 @@
 - [ ] Slider updates markdown + input
 - [ ] Persisted between opens
 - [ ] Reset returns to 1.0
+- [ ] UI does not auto-dismiss (especially when AI chat is inside a bottom sheet)
 
 ## PR-5 Quick Prompts Config
 
@@ -55,4 +59,11 @@
 - [ ] Optional encrypted api_key flow (password prompt)
 - [ ] Rollback on failure (rename `.bak.<ts>` restore)
 - [ ] Unit: `flutter test test/service/backup_crypto_test.dart`
+
+## PR-8 Reading/AI UX hotfix
+
+- [ ] Bookshelf page: no red `bottom overflowed by 1.00 pixels` warnings
+- [ ] Bottom sheet: opens at large fixed height (~95%), swipe-down dismiss works
+- [ ] Reading page: swipe up from lower-middle region opens AI bottom sheet
+- [ ] Font scale: dialog stays open; slider works; persisted
 

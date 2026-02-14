@@ -19,6 +19,23 @@ flutter gen-l10n
 dart run build_runner build --delete-conflicting-outputs
 ```
 
+## iOS: Archive shows old build number (TestFlight)
+
+If you changed `pubspec.yaml` `version: x.y.z+BUILD` but Xcode Archive still shows the old build number:
+
+- Check `ios/Flutter/Generated.xcconfig` contains the new `FLUTTER_BUILD_NUMBER`.
+- This file is generated and may not refresh with `flutter pub get` alone.
+
+Suggested fix:
+
+```bash
+flutter clean
+flutter pub get
+flutter build ios --release --no-codesign
+```
+
+Then Archive again.
+
 ## Unable to Import Books
 - Ensure the book format is supported. Please check the supported formats in the [README](../README.md).
 - Ensure the book file is not corrupted. You can try using other readers to confirm if the file is normal.
@@ -46,6 +63,23 @@ flutter pub get
 flutter gen-l10n
 dart run build_runner build --delete-conflicting-outputs
 ```
+
+## iOS：Archive 仍显示旧的 Build Number（TestFlight）
+
+如果你改了 `pubspec.yaml` 的 `version: x.y.z+BUILD`，但 Xcode Archive 里仍然显示旧的 Build Number：
+
+- 检查 `ios/Flutter/Generated.xcconfig` 中的 `FLUTTER_BUILD_NUMBER` 是否已更新。
+- 该文件是 Flutter 自动生成的，仅 `flutter pub get` 有时不会刷新。
+
+建议执行：
+
+```bash
+flutter clean
+flutter pub get
+flutter build ios --release --no-codesign
+```
+
+然后再 Archive。
 
 ## 无法导入书籍
 

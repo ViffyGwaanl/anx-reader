@@ -1,6 +1,6 @@
 # Release Notes / Migration Notes — AI sync & backup
 
-This note summarizes user-visible behavior changes introduced by PR-6 (WebDAV AI settings sync) and PR-7 (Backup v4 + optional encrypted API keys).
+This note summarizes user-visible behavior changes introduced by PR-6 (WebDAV AI settings sync), PR-7 (Backup v4 + optional encrypted API keys), and PR-8 (Reading/AI UX hotfix).
 
 ## PR-6 — WebDAV AI settings sync (no API key)
 
@@ -52,6 +52,15 @@ This note summarizes user-visible behavior changes introduced by PR-6 (WebDAV AI
 ### Failure recovery
 
 - Import creates `.bak.<timestamp>` backups and rolls back if any step fails.
+
+## PR-8 — Reading/AI UX hotfix
+
+### What users get
+
+- AI font scale popup is stable (no auto-dismiss while trying to adjust).
+- Bottom sheet AI chat opens at a large fixed height (~95%) to reduce resize frustration.
+- In bottom-sheet mode, swipe up from the lower-middle of the reading page to open AI (no need to open the menu first).
+- Bookshelf layout avoids 1px overflow warnings on some devices.
 
 ## Recommended user guidance
 
