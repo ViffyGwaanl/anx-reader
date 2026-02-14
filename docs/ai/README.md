@@ -15,8 +15,15 @@
 
 ## PR Stack / Status (fork)
 
-> Branches (top = newest):
+> Branches (top = newest). Note that some PRs may have a “work branch” and a “squashed branch” for upstream review.
 
+- PR-7: `feat/backup-restore-encrypted-api-key-squashed`
+  - Backup v4 ZIP + `manifest.json`
+  - Optional encrypted API key inclusion (password-based)
+  - Import confirmation + safe rollback via `.bak.<timestamp>`
+- PR-6: `feat/ai-settings-webdav-sync`
+  - WebDAV sync of `anx/config/ai_settings.json`
+  - Whole-file timestamp newer-wins; **api_key excluded**
 - PR-5: `feat/ai-quick-prompts-config` — configurable input quick prompts + prompt max length 20k
 - PR-4: `feat/ai-chat-font-scale` — font scale slider (markdown + input)
 - PR-3: `feat/ipad-ai-panel-mode-dock-side` — iPad panel mode (dock/bottomSheet) + dock side left/right

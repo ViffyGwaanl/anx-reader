@@ -54,4 +54,5 @@
 - [ ] Clear warning about overwrite (pre-import confirmation)
 - [ ] Optional encrypted api_key flow (password prompt)
 - [ ] Rollback on failure (rename `.bak.<ts>` restore)
+- [ ] Unit: `flutter test test/service/backup_crypto_test.dart`
 

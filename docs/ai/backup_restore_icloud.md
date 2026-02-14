@@ -1,10 +1,18 @@
 # Manual Backup/Restore via Files / iCloud Drive — Tech Design (PR-7)
 
-## 0. Background
+## 0. Implementation Status
+
+- Implemented in fork branch: `feat/backup-restore-encrypted-api-key-squashed`
+- Adds:
+  - v4 backup ZIP with `manifest.json`
+  - optional encrypted API keys
+  - import confirmation + rollback using `.bak.<timestamp>`
+
+## 1. Background
 
 Anx Reader already has **Export/Import** in `Settings → Sync`:
 
-- Export creates a ZIP (`AnxReader-Backup-YYYY-M-D-v3.zip`) containing:
+- Export creates a ZIP (legacy: `...-v3.zip`; fork enhancement: `...-v4.zip`) containing:
   - documents assets (file/cover/font/bgimg)
   - database dir
   - shared prefs backup map (`anx_shared_prefs.json`)
@@ -53,40 +61,42 @@ On Import:
 
 ## 3. Backup Package Format (v4)
 
-Keep existing v3 layout but add:
+Export produces a v4 ZIP (filename suffix `-v4.zip`) and adds:
 
-- `manifest.json`
+- `manifest.json` (schemaVersion = 4)
 
-Example:
+Example (as implemented in the fork):
 
 ```json
 {
   "schemaVersion": 4,
   "createdAt": 1730000000000,
-  "containsEncryptedApiKey": true,
-  "kdf": {
-    "alg": "PBKDF2-HMAC-SHA256",
-    "saltB64": "...",
-    "iterations": 150000
-  },
-  "encryption": {
-    "alg": "AES-256-GCM",
-    "nonceB64": "..."
-  },
-  "encryptedApiKeyB64": "..."
+  "containsEncryptedApiKeys": true,
+  "encryptedApiKeys": {
+    "kdf": {
+      "alg": "PBKDF2-HMAC-SHA256",
+      "saltB64": "...",
+      "iterations": 150000
+    },
+    "encryption": {
+      "alg": "AES-256-GCM",
+      "nonceB64": "..."
+    },
+    "cipherTextB64": "..."
+  }
 }
 ```
 
 Notes:
-- Only store api key if user explicitly enables.
-- Keep `anx_shared_prefs.json` but *remove* plain api key keys from it.
+- API keys are only stored if the user explicitly enables the option.
+- `anx_shared_prefs.json` never contains plain `api_key` entries.
 
 ## 4. Crypto Details
 
-- Use `package:crypto` for PBKDF2 (or implement using HMAC-SHA256)
-- AES-GCM:
-  - Prefer a vetted package if already in deps; otherwise consider adding one.
-  - If adding deps is not desired, defer encryption to PR-7b.
+Implementation (fork): uses `package:cryptography`.
+
+- KDF: PBKDF2-HMAC-SHA256, 150000 iterations, 16-byte salt
+- Cipher: AES-256-GCM, 12-byte nonce, 16-byte tag
 
 ## 5. Safe Restore Procedure
 

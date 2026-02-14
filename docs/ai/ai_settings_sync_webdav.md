@@ -12,7 +12,15 @@ We want AI-related configuration to be **portable across devices**, but with str
 - ✅ Sync model/url/headers/prompts/settings
 - ❌ Do **NOT** sync API keys via WebDAV
 
-## 1. Goals
+## 1. Implementation Status
+
+- Implemented in fork branch: `feat/ai-settings-webdav-sync`
+- Key files:
+  - `lib/service/sync/ai_settings_sync.dart` (schema v1 serializer + applier)
+  - `lib/providers/sync.dart` (`syncAiSettings()` called from the main sync flow)
+- Merge strategy: Phase 1 whole-file `updatedAt` newer-wins
+
+## 2. Goals
 
 1. Sync AI settings across devices using the existing WebDAV infrastructure.
 2. Preserve backward compatibility (older versions ignore the new config file).
@@ -71,6 +79,7 @@ We want AI-related configuration to be **portable across devices**, but with str
   "ui": {
     "aiPadPanelMode": "dock",
     "aiDockSide": "right",
+    "aiPanelPosition": "right",
     "aiPanelWidth": 300,
     "aiPanelHeight": 300,
     "aiSheetInitialSize": 0.6,
@@ -96,6 +105,11 @@ Notes:
   - if equal → no-op
 
 This is the most predictable behavior and lowest implementation risk for the first iteration.
+
+Implementation detail:
+
+- Local timestamp is tracked in `Prefs().aiSettingsUpdatedAt`.
+- It is bumped when **syncable AI settings** change (service url/model/headers, prompts, quick prompts, UI prefs), but **not** when `api_key` changes.
 
 ### Why timestamp
 
@@ -127,14 +141,17 @@ This isolates schema evolution from sync transport.
 Modify:
 
 - `lib/providers/sync.dart`
-  - in `syncFiles()`:
-    - upload local ai_settings.json
-    - download remote ai_settings.json
+  - add `syncAiSettings()` and call it from the main `sync()` flow (after DB sync; before/independent of book file sync)
 
 Ordering recommendation:
 
-- Download first, possibly apply to local
-- Then upload local if local wins
+- Download remote `ai_settings.json` first (if present)
+- Compare `updatedAt`
+- Apply remote if it wins; otherwise upload local snapshot
+
+Rationale:
+
+- AI settings sync must **not depend on the book list**. Even if the library is empty, AI config should still sync.
 
 ### 5.3 Backward compatibility
 
