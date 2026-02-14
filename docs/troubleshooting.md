@@ -36,6 +36,14 @@ flutter build ios --release --no-codesign
 
 Then Archive again.
 
+## Translation: AI full-text translation looks weird or fails
+
+- Full-text translation works best for reflowable formats (ePub, txt). PDF text layers are often fragmented or missing.
+- If you use **AI** translation for full-text translation:
+  - prefer translating a **short selection** first to confirm the provider works
+  - if long paragraphs fail, reduce the translated chunk size (or try a non-AI provider)
+- For scanned PDFs (no selectable text): OCR is required before translation can be reliable.
+
 ## Unable to Import Books
 - Ensure the book format is supported. Please check the supported formats in the [README](../README.md).
 - Ensure the book file is not corrupted. You can try using other readers to confirm if the file is normal.
@@ -80,6 +88,14 @@ flutter build ios --release --no-codesign
 ```
 
 然后再 Archive。
+
+## 翻译：AI 全文翻译效果怪 / 无法翻译
+
+- 全文翻译对可重排格式（EPUB、TXT）效果更好；PDF 的文字层常常是碎片化或缺失的。
+- 如果你使用 **AI** 作为全文翻译服务：
+  - 建议先用“选中翻译”翻译一小段，确认服务商配置可用
+  - 如果长段落容易失败，可降低单次翻译长度（或切换到非 AI 翻译服务）
+- 扫描版 PDF（不可选中文字）需要 OCR 才能获得可靠的翻译/问答效果。
 
 ## 无法导入书籍
 

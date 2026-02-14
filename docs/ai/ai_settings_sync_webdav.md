@@ -122,6 +122,12 @@ Implementation detail:
 - Deletion propagation (tombstones)
 - Per-item updatedAt
 
+**Custom providers / advanced fields** (planned):
+
+- Support multiple OpenAI-compatible providers (custom entries).
+- Sync non-secret fields for custom providers (url/model/headers/params).
+- Continue to exclude api_key from WebDAV sync.
+
 Defer until we see real conflict pain in the wild.
 
 ## 5. Implementation Plan

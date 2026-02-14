@@ -102,3 +102,64 @@ Implementation branch: `feat/ui-fixes`
 - [ ] Organizer: Distribute App → App Store Connect → Upload
 - [ ] App Store Connect: resolve Export Compliance questions if prompted (crypto)
 
+---
+
+## PR-9 (planned) — AI Provider Configuration UX Refactor
+
+Reference: `docs/ai/ai_provider_config_ux.md`
+
+1. **Stabilize editing (Phase A)**
+   - [ ] Move `TextEditingController` ownership into State (no controllers created in `build()`)
+   - [ ] Fixed field order + clearer labels (url/model/api_key)
+   - [ ] Improve error reporting on Test
+
+2. **Advanced fields (Phase B)**
+   - [ ] Expose headers (JSON), temperature/top_p/max_tokens
+   - [ ] Persist into provider config map (`Prefs().saveAiConfig`)
+
+3. **Custom OpenAI-compatible providers (optional Phase C)**
+   - [ ] Allow multiple OpenAI-compatible entries
+   - [ ] Update WebDAV sync schema to include custom providers (still exclude api_key)
+
+---
+
+## PR-10 (planned) — AI Translation UX Hardening
+
+Reference: `docs/ai/ai_translation_design.md`
+
+- [ ] Split translation prompts: selection vs full-text
+- [ ] Full-text translation prompt must output translation-only
+- [ ] Add length caps / chunking for stability
+- [ ] PDF: add safe fallback guidance (selection preferred)
+
+---
+
+## PR-11 (planned) — PDF AI “Chapter” Extraction Improvements
+
+Reference: `docs/ai/pdf_ai_chaptering_and_ocr.md`
+
+- [ ] When PDF outline exists: treat TOC items as page ranges, return multi-page chapter content
+- [ ] When outline missing: page-window fallback for "current chapter"
+- [ ] Ensure `maxCharacters` capping works consistently
+
+---
+
+## PR-12 (planned) — MinerU OCR Integration for Scanned PDFs
+
+Reference: `docs/ai/pdf_ai_chaptering_and_ocr.md`
+
+- [ ] Integrate MinerU (HTTP or CLI runner)
+- [ ] Cache OCR results per book
+- [ ] Tool fallback: if PDF text layer empty → use OCR cache
+- [ ] UX: status + progress + retry
+
+---
+
+## PR-13 (planned) — Whole-book Q&A Quality Improvements
+
+- Phase 1 (no embeddings):
+  - [ ] Keyword search query expansion
+  - [ ] Snippet aggregation + targeted chapter/page fetch
+- Phase 2 (optional):
+  - [ ] Embeddings + rerank (larger scope; requires provider/infra decisions)
+

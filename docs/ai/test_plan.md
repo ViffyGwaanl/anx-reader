@@ -67,3 +67,28 @@
 - [ ] Reading page: swipe up from lower-middle region opens AI bottom sheet
 - [ ] Font scale: dialog stays open; slider works; persisted
 
+## PR-9 AI provider configuration UX
+
+- [ ] Editing is stable (no cursor jumps while typing)
+- [ ] Basic fields work: url/baseUrl, model, api_key (hide/show)
+- [ ] Test button reports actionable errors (401/404/model-not-found/network)
+- [ ] Advanced fields (if implemented): headers/temperature/top_p/max_tokens persisted
+
+## PR-10 AI translation hardening
+
+- [ ] Selection translation: detailed (glossary/notes allowed)
+- [ ] Full-text translation: translation-only (no extra analysis blocks)
+- [ ] Long paragraphs are chunked or capped to reduce failure rate
+- [ ] PDF: safe fallback behavior (selection preferred)
+
+## PR-11 PDF AI chaptering
+
+- [ ] PDF with outline: chapter content returns multi-page range
+- [ ] PDF without outline: current chapter uses page-window context
+
+## PR-12 MinerU OCR (scanned PDFs)
+
+- [ ] OCR job can be started and cached
+- [ ] After OCR, AI chapter/page tools return meaningful text
+- [ ] No repeated OCR runs once cached
+
