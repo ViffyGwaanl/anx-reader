@@ -93,14 +93,16 @@ Notes:
 1. Validate ZIP structure and manifest.
 2. Extract to temp dir.
 3. Close DB and stop readers (`DBHelper.close()` etc.)
-4. Copy files to staging/backup old local dirs (or rename old to `.bak`).
-5. Replace DB:
-   - remove WAL/SHM
-   - copy new DB
-   - reopen DB
-6. Apply prefs backup map.
-7. If encrypted api key included and password ok, apply key.
-8. If any step fails: rollback using `.bak`.
+4. **In-place backup** existing local dirs by renaming to `.bak.<timestamp>` (cheap + same filesystem):
+   - documents: `file/ cover/ font/ bgimg`
+   - databases dir
+5. Copy extracted dirs into the original locations.
+6. Reopen DB.
+7. Apply prefs backup map.
+8. If encrypted api key included and password ok, apply key.
+9. If any step fails: rollback by deleting partial new dirs and renaming `.bak.*` back.
+
+Implementation status (fork): this rollback approach is implemented in PR-7 branch.
 
 ## 6. Testing
 

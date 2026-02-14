@@ -51,7 +51,7 @@
 ## PR-7 Backup/Restore enhancements
 
 - [ ] Export/import via Files works on iOS
-- [ ] Clear warning about overwrite
-- [ ] Optional encrypted api_key flow
-- [ ] Rollback on failure
+- [ ] Clear warning about overwrite (pre-import confirmation)
+- [ ] Optional encrypted api_key flow (password prompt)
+- [ ] Rollback on failure (rename `.bak.<ts>` restore)
 
