@@ -12,8 +12,8 @@
 
 2. **WebDAV file transport integration**
    - [ ] Add remote path `anx/config/ai_settings.json`
-   - [ ] Extend `lib/providers/sync.dart` `syncFiles()` to upload/download
-   - [ ] `updatedAt` conflict resolution
+   - [ ] Extend `lib/providers/sync.dart` `sync()` to upload/download (do not depend on book list)
+   - [ ] Whole-file `updatedAt` conflict resolution (Phase 1)
 
 3. **Migration / Backward compatibility**
    - [ ] Missing/invalid JSON: log + skip

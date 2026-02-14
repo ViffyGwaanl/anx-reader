@@ -85,22 +85,30 @@ Notes:
 
 ## 4. Merge / Conflict Resolution
 
-### Strategy
+### Strategy (Phase 1 — chosen)
+
+**Whole-file snapshot** + timestamp resolution.
 
 - Download remote file if exists.
 - Compare `updatedAt`:
-  - if remote newer → apply remote into local prefs
-  - if local newer → upload local
+  - if remote newer → apply remote into local prefs (overwrite local snapshot)
+  - if local newer → upload local snapshot (overwrite remote)
   - if equal → no-op
+
+This is the most predictable behavior and lowest implementation risk for the first iteration.
 
 ### Why timestamp
 
 - Simple and predictable.
 - Matches Anx Reader's current “replace DB” style.
 
-### Optional future enhancement
+### Optional future enhancement (Phase 2)
 
-- Field-level merge (e.g., merge userPrompts by id), but defer unless needed.
+- Field-level merge (e.g., merge userPrompts / quickPrompts by id)
+- Deletion propagation (tombstones)
+- Per-item updatedAt
+
+Defer until we see real conflict pain in the wild.
 
 ## 5. Implementation Plan
 
