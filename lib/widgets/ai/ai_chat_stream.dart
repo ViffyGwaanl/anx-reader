@@ -7,6 +7,7 @@ import 'package:anx_reader/providers/ai_chat.dart';
 import 'package:anx_reader/providers/ai_history.dart';
 import 'package:anx_reader/service/ai/ai_services.dart';
 import 'package:anx_reader/service/ai/ai_history.dart';
+import 'package:anx_reader/models/ai_provider_meta.dart';
 import 'package:anx_reader/service/ai/index.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/utils/ai_reasoning_parser.dart';
@@ -51,8 +52,12 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   StreamSubscription<List<ChatMessage>>? _messageSubscription;
   final ScrollController _scrollController = ScrollController();
   bool _isStreaming = false;
-  late List<AiServiceOption> _serviceOptions;
-  late String _selectedServiceId;
+
+  late final List<AiServiceOption> _builtInOptions;
+  late final Map<String, AiServiceOption> _builtInById;
+  late List<AiProviderMeta> _providers;
+  late String _selectedProviderId;
+
   late List<String> _suggestedPrompts;
   late List<String> _starterPrompts;
 
@@ -98,12 +103,18 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
       L10n.of(navigatorKey.currentContext!).quickPrompt11,
       L10n.of(navigatorKey.currentContext!).quickPrompt12,
     ];
-    _serviceOptions = buildDefaultAiServices();
-    _selectedServiceId = Prefs().selectedAiService;
-    final availableIds = _serviceOptions.map((option) => option.identifier);
-    if (!availableIds.contains(_selectedServiceId)) {
-      _selectedServiceId = _serviceOptions.first.identifier;
-      Prefs().selectedAiService = _selectedServiceId;
+    _builtInOptions = buildDefaultAiServices();
+    _builtInById = {
+      for (final option in _builtInOptions) option.identifier: option,
+    };
+
+    _ensureProvidersInitialized();
+    _providers = Prefs().aiProvidersV1;
+
+    _selectedProviderId = Prefs().selectedAiService;
+    if (!_isProviderSelectable(_selectedProviderId)) {
+      _selectedProviderId = _fallbackProviderId(_providers);
+      Prefs().selectedAiService = _selectedProviderId;
     }
     inputController.text = widget.initialMessage ?? '';
     _suggestedPrompts = _pickSuggestedPrompts();
@@ -122,29 +133,108 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     super.dispose();
   }
 
-  AiServiceOption get _currentService => _serviceOptions.firstWhere(
-        (option) => option.identifier == _selectedServiceId,
-        orElse: () => _serviceOptions.first,
-      );
+  void _ensureProvidersInitialized() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final builtIns = _builtInOptions.map((option) {
+      final type = switch (option.identifier) {
+        'claude' => AiProviderType.anthropic,
+        'gemini' => AiProviderType.gemini,
+        _ => AiProviderType.openaiCompatible,
+      };
 
-  String _modelLabel(String serviceId) {
-    final option = _serviceOptions.firstWhere(
-      (element) => element.identifier == serviceId,
-      orElse: () => _serviceOptions.first,
-    );
-    final stored = Prefs().getAiConfig(serviceId);
-    final model = stored['model'];
-    if (model != null && model.trim().isNotEmpty) {
-      return model;
-    }
-    return option.defaultModel;
+      return AiProviderMeta(
+        id: option.identifier,
+        name: option.title,
+        type: type,
+        enabled: true,
+        isBuiltIn: true,
+        createdAt: now,
+        updatedAt: now,
+        logoKey: option.logo,
+      );
+    }).toList(growable: false);
+
+    Prefs().ensureAiProvidersV1Initialized(builtIns: builtIns);
   }
 
-  void _onServiceSelected(String identifier) {
-    if (_isStreaming || identifier == _selectedServiceId) return;
-    Prefs().selectedAiService = identifier;
+  AiProviderMeta? _providerById(String id) {
+    for (final p in _providers) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  bool _isProviderSelectable(String id) {
+    final p = _providerById(id);
+    return p != null && p.enabled;
+  }
+
+  String _fallbackProviderId(List<AiProviderMeta> providers) {
+    for (final p in providers) {
+      if (p.id == 'openai' && p.enabled) return p.id;
+    }
+    for (final p in providers) {
+      if (p.enabled) return p.id;
+    }
+    return 'openai';
+  }
+
+  AiProviderMeta get _currentProvider {
+    return _providerById(_selectedProviderId) ??
+        (_providers.isNotEmpty
+            ? _providers.first
+            : AiProviderMeta(
+                id: 'openai',
+                name: 'OpenAI',
+                type: AiProviderType.openaiCompatible,
+                enabled: true,
+                isBuiltIn: true,
+                createdAt: 0,
+                updatedAt: 0,
+              ));
+  }
+
+  AiServiceOption? _builtInOptionForProvider(AiProviderMeta meta) {
+    final exact = _builtInById[meta.id];
+    if (exact != null) return exact;
+
+    // Custom providers: fall back to the built-in logo/model per type.
+    switch (meta.type) {
+      case AiProviderType.anthropic:
+        return _builtInById['claude'];
+      case AiProviderType.gemini:
+        return _builtInById['gemini'];
+      case AiProviderType.openaiCompatible:
+        return _builtInById['openai'];
+    }
+  }
+
+  String _providerLogoKey(AiProviderMeta meta) {
+    return meta.logoKey ?? _builtInOptionForProvider(meta)?.logo ?? '';
+  }
+
+  String _modelLabel(String providerId) {
+    final stored = Prefs().getAiConfig(providerId);
+    final model = stored['model']?.trim();
+    if (model != null && model.isNotEmpty) {
+      return model;
+    }
+
+    final meta = _providerById(providerId);
+    final builtIn = meta == null
+        ? _builtInById[providerId]
+        : _builtInOptionForProvider(meta);
+
+    return builtIn?.defaultModel ?? '';
+  }
+
+  void _onProviderSelected(String providerId) {
+    if (_isStreaming || providerId == _selectedProviderId) return;
+    if (!_isProviderSelectable(providerId)) return;
+
+    Prefs().selectedAiService = providerId;
     setState(() {
-      _selectedServiceId = identifier;
+      _selectedProviderId = providerId;
     });
   }
 
@@ -207,11 +297,12 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   }
 
   Widget _buildHistoryTile(BuildContext context, AiChatHistoryEntry entry) {
-    final option = _serviceOptionById(entry.serviceId);
+    final provider = _providerByIdFromPrefs(entry.serviceId) ??
+        _providerById(entry.serviceId);
     final statusColor =
         entry.completed ? Colors.green : Theme.of(context).colorScheme.tertiary;
     final title = _deriveTitle(entry);
-    final subtitle = _buildHistorySubtitle(option, entry);
+    final subtitle = _buildHistorySubtitle(provider, entry);
 
     return FilledContainer(
       margin: EdgeInsets.symmetric(horizontal: 8),
@@ -263,21 +354,18 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   }
 
   String _buildHistorySubtitle(
-      AiServiceOption? option, AiChatHistoryEntry entry) {
-    final serviceLabel = option?.title ?? entry.serviceId;
+    AiProviderMeta? provider,
+    AiChatHistoryEntry entry,
+  ) {
+    final serviceLabel = provider?.name ?? entry.serviceId;
     if (entry.model.isEmpty) {
       return serviceLabel;
     }
     return '$serviceLabel · ${entry.model}';
   }
 
-  AiServiceOption? _serviceOptionById(String id) {
-    for (final option in _serviceOptions) {
-      if (option.identifier == id) {
-        return option;
-      }
-    }
-    return null;
+  AiProviderMeta? _providerByIdFromPrefs(String id) {
+    return Prefs().getAiProviderMeta(id);
   }
 
   String _deriveTitle(AiChatHistoryEntry entry) {
@@ -491,27 +579,39 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   Widget build(BuildContext context) {
     final quickPrompts = _getQuickPrompts(context);
 
+    final current = _currentProvider;
+    final currentModel = _modelLabel(_selectedProviderId);
+
     var aiService = PopupMenuButton<String>(
       enabled: !_isStreaming,
-      onSelected: _onServiceSelected,
+      onSelected: _onProviderSelected,
       itemBuilder: (context) {
-        return _serviceOptions.map((option) {
-          final isSelected = option.identifier == _selectedServiceId;
-          final label = _modelLabel(option.identifier);
+        return _providers.map((provider) {
+          final isSelected = provider.id == _selectedProviderId;
+          final model = _modelLabel(provider.id);
+          final logoKey = _providerLogoKey(provider);
+
+          final label =
+              model.isEmpty ? provider.name : '${provider.name} · $model';
+
           return PopupMenuItem<String>(
-            value: option.identifier,
+            value: provider.id,
+            enabled: provider.enabled,
             child: Row(
               children: [
-                Image.asset(
-                  option.logo,
-                  width: 20,
-                  height: 20,
-                  errorBuilder: (_, __, ___) => const SizedBox(),
-                ),
+                if (logoKey.isNotEmpty)
+                  Image.asset(
+                    logoKey,
+                    width: 20,
+                    height: 20,
+                    errorBuilder: (_, __, ___) => const SizedBox(),
+                  )
+                else
+                  const SizedBox(width: 20, height: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${option.title} · $label',
+                    label,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -525,7 +625,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Image.asset(
-            _currentService.logo,
+            _providerLogoKey(current),
             width: 20,
             height: 20,
             errorBuilder: (_, __, ___) => const SizedBox(),
@@ -533,7 +633,9 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
           const SizedBox(width: 6),
           Flexible(
             child: Text(
-              '${_currentService.title} · ${_modelLabel(_selectedServiceId)}',
+              currentModel.isEmpty
+                  ? current.name
+                  : '${current.name} · $currentModel',
               style: Theme.of(context).textTheme.bodySmall,
               overflow: TextOverflow.ellipsis,
             ),

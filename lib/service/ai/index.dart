@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/main.dart';
+import 'package:anx_reader/models/ai_provider_meta.dart';
 import 'package:anx_reader/service/ai/langchain_ai_config.dart';
 import 'package:anx_reader/service/ai/langchain_registry.dart';
 import 'package:anx_reader/service/ai/langchain_runner.dart';
@@ -51,8 +52,22 @@ Stream<String> _generateStream({
 }) async* {
   AnxLog.info('aiGenerateStream called identifier: $identifier');
   final sanitizedMessages = _sanitizeMessagesForPrompt(messages);
-  final selectedIdentifier = identifier ?? Prefs().selectedAiService;
-  final savedConfig = Prefs().getAiConfig(selectedIdentifier);
+  final selectedProviderId = identifier ?? Prefs().selectedAiService;
+
+  // Provider Center integration:
+  // - `selectedAiService` stores a provider id (built-in id or custom uuid).
+  // - LangChain registry resolves by *provider kind* (openai/claude/gemini).
+  //   We map from provider meta.type to a stable built-in identifier.
+  final meta = Prefs().getAiProviderMeta(selectedProviderId);
+  final registryIdentifier = meta == null
+      ? selectedProviderId
+      : switch (meta.type) {
+          AiProviderType.anthropic => 'claude',
+          AiProviderType.gemini => 'gemini',
+          AiProviderType.openaiCompatible => 'openai',
+        };
+
+  final savedConfig = Prefs().getAiConfig(selectedProviderId);
   if (savedConfig.isEmpty &&
       (overrideConfig == null || overrideConfig.isEmpty)) {
     final context = navigatorKey.currentContext;
@@ -64,15 +79,16 @@ Stream<String> _generateStream({
     return;
   }
 
-  var config = LangchainAiConfig.fromPrefs(selectedIdentifier, savedConfig);
+  var config = LangchainAiConfig.fromPrefs(registryIdentifier, savedConfig);
   if (overrideConfig != null && overrideConfig.isNotEmpty) {
     final override =
-        LangchainAiConfig.fromPrefs(selectedIdentifier, overrideConfig);
+        LangchainAiConfig.fromPrefs(registryIdentifier, overrideConfig);
     config = mergeConfigs(config, override);
   }
 
   AnxLog.info(
-      'aiGenerateStream: $selectedIdentifier, model: ${config.model}, baseUrl: ${config.baseUrl}');
+    'aiGenerateStream: $selectedProviderId($registryIdentifier), model: ${config.model}, baseUrl: ${config.baseUrl}',
+  );
 
   final pipeline = registry.resolve(config, useAgent: useAgent);
   final model = pipeline.model;
