@@ -7,6 +7,7 @@ import 'package:anx_reader/service/ai/ai_services.dart';
 import 'package:anx_reader/service/ai/index.dart';
 import 'package:anx_reader/service/ai/prompt_generate.dart';
 import 'package:anx_reader/service/ai/tools/ai_tool_registry.dart';
+import 'package:anx_reader/page/settings_page/ai_provider_center/ai_provider_center_page.dart';
 import 'package:anx_reader/widgets/ai/ai_stream.dart';
 import 'package:anx_reader/widgets/common/anx_button.dart';
 import 'package:anx_reader/widgets/delete_confirm.dart';
@@ -137,6 +138,20 @@ class _AISettingsState extends ConsumerState<AISettings> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
           ),
+          CustomSettingsTile(
+            child: SettingsTile.navigation(
+              title: const Text('供应商中心 / Provider Center'),
+              description: const Text('Cherry-style provider configuration'),
+              onPressed: (context) {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const AiProviderCenterPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
           for (var key in services[currentIndex]["config"].keys)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),

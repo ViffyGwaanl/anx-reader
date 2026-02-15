@@ -29,6 +29,7 @@ import 'package:anx_reader/models/read_theme.dart';
 import 'package:anx_reader/models/reading_info.dart';
 import 'package:anx_reader/models/reading_rules.dart';
 import 'package:anx_reader/models/user_prompt.dart';
+import 'package:anx_reader/models/ai_provider_meta.dart';
 import 'package:anx_reader/widgets/statistic/dashboard_tiles/dashboard_tile_registry.dart';
 import 'package:anx_reader/models/window_info.dart';
 import 'package:anx_reader/service/ai/tools/ai_tool_registry.dart';
@@ -820,6 +821,108 @@ class Prefs extends ChangeNotifier {
 
   String get selectedAiService {
     return prefs.getString('selectedAiService') ?? 'openai';
+  }
+
+  // --- Provider Center (Cherry-style) ---
+
+  static const String _aiProvidersV1Key = 'aiProvidersV1';
+
+  bool get hasAiProvidersV1 => prefs.containsKey(_aiProvidersV1Key);
+
+  List<AiProviderMeta> get aiProvidersV1 {
+    final raw = prefs.getString(_aiProvidersV1Key);
+    if (raw == null || raw.trim().isEmpty) {
+      return const [];
+    }
+
+    try {
+      return AiProviderMeta.decodeList(raw);
+    } catch (e) {
+      // Corrupted value - keep app usable.
+      AnxLog.severe('Failed to decode aiProvidersV1: $e');
+      return const [];
+    }
+  }
+
+  set aiProvidersV1(List<AiProviderMeta> providers) {
+    prefs.setString(_aiProvidersV1Key, AiProviderMeta.encodeList(providers));
+    notifyListeners();
+  }
+
+  /// Initialize provider metadata storage with the given built-in providers.
+  ///
+  /// - Only runs if the key is missing or empty.
+  /// - Ensures built-ins are always present (without touching secrets).
+  void ensureAiProvidersV1Initialized({
+    required List<AiProviderMeta> builtIns,
+  }) {
+    final existing = aiProvidersV1;
+    if (existing.isEmpty) {
+      aiProvidersV1 = builtIns;
+      return;
+    }
+
+    final byId = <String, AiProviderMeta>{
+      for (final p in existing) p.id: p,
+    };
+
+    final merged = <AiProviderMeta>[];
+
+    // Keep built-ins in a stable, well-known order.
+    for (final builtIn in builtIns) {
+      final current = byId.remove(builtIn.id);
+      if (current == null) {
+        merged.add(builtIn);
+        continue;
+      }
+
+      // Refresh non-sensitive display fields, but preserve user toggles.
+      merged.add(
+        current.copyWith(
+          name: builtIn.name,
+          type: builtIn.type,
+          isBuiltIn: true,
+          logoKey: builtIn.logoKey,
+        ),
+      );
+    }
+
+    // Append remaining providers (custom) in their existing order.
+    for (final p in existing) {
+      if (byId.containsKey(p.id)) {
+        merged.add(p);
+      }
+    }
+
+    // Write back only if changed.
+    if (AiProviderMeta.encodeList(merged) !=
+        AiProviderMeta.encodeList(existing)) {
+      aiProvidersV1 = merged;
+    }
+  }
+
+  AiProviderMeta? getAiProviderMeta(String id) {
+    for (final p in aiProvidersV1) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  void upsertAiProviderMeta(AiProviderMeta meta) {
+    final existing = List<AiProviderMeta>.from(aiProvidersV1);
+    final index = existing.indexWhere((p) => p.id == meta.id);
+    if (index >= 0) {
+      existing[index] = meta;
+    } else {
+      existing.add(meta);
+    }
+    aiProvidersV1 = existing;
+  }
+
+  void deleteAiProviderMeta(String id) {
+    final existing = aiProvidersV1;
+    if (existing.isEmpty) return;
+    aiProvidersV1 = existing.where((p) => p.id != id).toList(growable: false);
   }
 
   void deleteAiConfig(String identifier) {
