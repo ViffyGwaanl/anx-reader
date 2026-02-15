@@ -35,8 +35,10 @@ class AiChat extends _$AiChat {
   Stream<List<ChatMessage>> sendMessageStream(
     String message,
     WidgetRef widgetRef,
-    bool isRegenerate,
-  ) async* {
+    bool isRegenerate, {
+    int? regenerateFromUserIndex,
+    bool replaceUserMessage = false,
+  }) async* {
     final sessionId = _ensureSessionId();
     final serviceId = Prefs().selectedAiService;
     final config = Prefs().getAiConfig(serviceId);
@@ -54,15 +56,73 @@ class AiChat extends _$AiChat {
     }
     final now = DateTime.now().millisecondsSinceEpoch;
 
-    List<ChatMessage> messages = [
-      ...state.whenOrNull(data: (data) => data) ?? [],
-      ChatMessage.humanText(message),
-    ];
+    final existing =
+        state.whenOrNull(data: (data) => data) ?? const <ChatMessage>[];
 
-    state = AsyncData(messages);
+    List<ChatMessage> promptMessages;
+    List<ChatMessage> visibleMessages;
 
-    List<ChatMessage> updatedMessages = [
-      ...messages,
+    if (!isRegenerate && !replaceUserMessage) {
+      promptMessages = [
+        ...existing,
+        ChatMessage.humanText(message),
+      ];
+      visibleMessages = promptMessages;
+    } else {
+      // Regenerate or edit+regenerate from a specific user message.
+      var userIndex = regenerateFromUserIndex;
+      if (userIndex == null) {
+        for (var i = existing.length - 1; i >= 0; i--) {
+          if (existing[i] is HumanChatMessage) {
+            userIndex = i;
+            break;
+          }
+        }
+      }
+      if (userIndex == null || userIndex < 0 || userIndex >= existing.length) {
+        // Fallback to normal send.
+        promptMessages = [
+          ...existing,
+          ChatMessage.humanText(message),
+        ];
+        visibleMessages = promptMessages;
+      } else {
+        final userMessage = existing[userIndex];
+        if (userMessage is! HumanChatMessage) {
+          promptMessages = [
+            ...existing,
+            ChatMessage.humanText(message),
+          ];
+          visibleMessages = promptMessages;
+        } else {
+          // Determine the end of this user turn (keep existing variants if any).
+          var turnEnd = userIndex + 1;
+          while (
+              turnEnd < existing.length && existing[turnEnd] is AIChatMessage) {
+            turnEnd++;
+          }
+
+          if (replaceUserMessage) {
+            // Editing: replace the user content, drop old variants and everything after.
+            visibleMessages = [
+              ...existing.take(userIndex),
+              ChatMessage.humanText(message),
+            ];
+            promptMessages = visibleMessages;
+          } else {
+            // Regenerate: keep existing variants for UI, but do NOT send them to the model.
+            visibleMessages = existing.take(turnEnd).toList(growable: false);
+            promptMessages =
+                existing.take(userIndex + 1).toList(growable: false);
+          }
+        }
+      }
+    }
+
+    state = AsyncData(visibleMessages);
+
+    final updatedMessages = [
+      ...visibleMessages,
       ChatMessage.ai(''),
     ];
 
@@ -90,7 +150,7 @@ class AiChat extends _$AiChat {
     String assistantResponse = "";
     try {
       await for (final chunk in aiGenerateStream(
-        messages,
+        promptMessages,
         regenerate: isRegenerate,
         useAgent: true,
         ref: widgetRef,

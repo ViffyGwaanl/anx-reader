@@ -693,24 +693,11 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     });
   }
 
-  void _sendMessage({bool isRegenerate = false}) {
-    if (_isStreaming) {
-      return;
-    }
-
-    if (inputController.text.trim().isEmpty) return;
-    final message = inputController.text.trim();
-    inputController.clear();
-
+  void _startStream(Stream<List<ChatMessage>> stream) {
     _messageSubscription?.cancel();
     _messageController?.close();
 
     final controller = StreamController<List<ChatMessage>>();
-    final stream = ref.read(aiChatProvider.notifier).sendMessageStream(
-          message,
-          ref,
-          isRegenerate,
-        );
 
     setState(() {
       _messageController = controller;
@@ -748,6 +735,55 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     );
   }
 
+  void _sendMessage() {
+    if (_isStreaming) {
+      return;
+    }
+
+    if (inputController.text.trim().isEmpty) return;
+    final message = inputController.text.trim();
+    inputController.clear();
+
+    final stream = ref.read(aiChatProvider.notifier).sendMessageStream(
+          message,
+          ref,
+          false,
+        );
+
+    _startStream(stream);
+  }
+
+  void _regenerateFromUserIndex(int userIndex) {
+    if (_isStreaming) {
+      return;
+    }
+
+    final stream = ref.read(aiChatProvider.notifier).sendMessageStream(
+          '',
+          ref,
+          true,
+          regenerateFromUserIndex: userIndex,
+        );
+
+    _startStream(stream);
+  }
+
+  void _editUserMessageAndRegenerate(int userIndex, String newText) {
+    if (_isStreaming) {
+      return;
+    }
+
+    final stream = ref.read(aiChatProvider.notifier).sendMessageStream(
+          newText,
+          ref,
+          true,
+          regenerateFromUserIndex: userIndex,
+          replaceUserMessage: true,
+        );
+
+    _startStream(stream);
+  }
+
   void _useQuickPrompt(String prompt) {
     inputController.text = '$prompt ${inputController.text}';
     _sendMessage();
@@ -780,12 +816,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     for (int i = messages.length - 1; i >= 0; i--) {
       final message = messages[i];
       if (message is HumanChatMessage) {
-        final history = messages.take(i).toList(growable: false);
-        ref.read(aiChatProvider.notifier).restore(history);
-        setState(() {
-          inputController.text = message.contentAsString;
-          _sendMessage(isRegenerate: true);
-        });
+        _regenerateFromUserIndex(i);
         break;
       }
     }
