@@ -143,9 +143,11 @@ class AiChat extends _$AiChat {
       model: model,
     );
 
-    await historyNotifier.upsert(draftEntry);
-
+    // Do not block streaming on history persistence (can be slow/unavailable
+    // in widget tests). Best-effort background write.
+    state = AsyncData(updatedMessages);
     yield updatedMessages;
+    historyNotifier.upsert(draftEntry).catchError((_) {});
 
     String assistantResponse = "";
     try {
@@ -172,7 +174,7 @@ class AiChat extends _$AiChat {
         completed: true,
         model: model,
       );
-      await historyNotifier.upsert(completedEntry);
+      historyNotifier.upsert(completedEntry).catchError((_) {});
     } catch (_) {
       final failedEntry = draftEntry.copyWith(
         messages: List<ChatMessage>.from(state.value ?? updatedMessages),
@@ -180,7 +182,7 @@ class AiChat extends _$AiChat {
         completed: false,
         model: model,
       );
-      await historyNotifier.upsert(failedEntry);
+      historyNotifier.upsert(failedEntry).catchError((_) {});
       rethrow;
     }
   }

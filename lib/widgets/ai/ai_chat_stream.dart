@@ -788,6 +788,119 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     _startStream(stream);
   }
 
+  void _copyPlainText(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    AnxToast.show(L10n.of(context).notesPageCopied);
+  }
+
+  Future<void> _confirmRegenerateFromUserIndex(
+    int userIndex, {
+    required bool isLastTurn,
+  }) async {
+    if (_isStreaming) {
+      return;
+    }
+
+    if (!isLastTurn) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(L10n.of(context).aiChatRegenerateFromHereConfirmTitle),
+            content: Text(L10n.of(context).aiChatRegenerateFromHereConfirmBody),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(L10n.of(context).commonCancel),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(L10n.of(context).commonConfirm),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirmed != true) {
+        return;
+      }
+    }
+
+    _regenerateFromUserIndex(userIndex);
+  }
+
+  Future<void> _showEditUserMessageDialog(
+    int userIndex,
+    String currentText,
+  ) async {
+    if (_isStreaming) {
+      return;
+    }
+
+    final controller = TextEditingController(text: currentText);
+    try {
+      final edited = await showDialog<String>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(L10n.of(context).aiChatEditUserMessageTitle),
+            content: TextField(
+              controller: controller,
+              maxLength: 20000,
+              maxLines: 6,
+              minLines: 1,
+              autofocus: true,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(L10n.of(context).commonCancel),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop(controller.text.trim());
+                },
+                child: Text(L10n.of(context).commonSave),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (edited == null) {
+        return;
+      }
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(L10n.of(context).aiChatRegenerateFromHereConfirmTitle),
+            content: Text(L10n.of(context).aiChatRegenerateFromHereConfirmBody),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(L10n.of(context).commonCancel),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(L10n.of(context).commonConfirm),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (confirmed != true) {
+        return;
+      }
+
+      _editUserMessageAndRegenerate(userIndex, edited);
+    } finally {
+      controller.dispose();
+    }
+  }
+
   void _useQuickPrompt(String prompt) {
     inputController.text = '$prompt ${inputController.text}';
     _sendMessage();
@@ -1255,7 +1368,28 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                   bottomRight: Radius.circular(12),
                 ),
               ),
-              child: _buildCollapsibleText(content, isLongMessage),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildCollapsibleText(content, isLongMessage),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => _showEditUserMessageDialog(
+                          item.index,
+                          content,
+                        ),
+                        child: Text(L10n.of(context).commonEdit),
+                      ),
+                      TextButton(
+                        onPressed: () => _copyPlainText(content),
+                        child: Text(L10n.of(context).commonCopy),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 8),
@@ -1340,9 +1474,12 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                             const SizedBox(width: 4),
                           ],
                         ),
-                      if (isLastTurn)
+                      if (item.userIndex != null)
                         TextButton(
-                          onPressed: _regenerateLastMessage,
+                          onPressed: () => _confirmRegenerateFromUserIndex(
+                            item.userIndex!,
+                            isLastTurn: isLastTurn,
+                          ),
                           child: Text(L10n.of(context).aiRegenerate),
                         ),
                       TextButton(

@@ -877,5 +877,8 @@
   "aiThinkingMedium": "Medium",
   "aiThinkingHigh": "High",
   "aiSectionThinking": "Thinking",
-  "aiSectionTools": "Tools"
+  "aiSectionTools": "Tools",
+  "aiChatRegenerateFromHereConfirmTitle": "Regenerate from here?",
+  "aiChatRegenerateFromHereConfirmBody": "This will discard the conversation after this message and regenerate from this point. Continue?",
+  "aiChatEditUserMessageTitle": "Edit message"
 }

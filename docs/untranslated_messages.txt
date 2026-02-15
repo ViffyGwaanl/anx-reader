@@ -34,7 +34,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "de": [
@@ -72,7 +75,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "es": [
@@ -110,7 +116,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "fr": [
@@ -148,7 +157,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "it": [
@@ -186,7 +198,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "ja": [
@@ -224,7 +239,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "ko": [
@@ -262,7 +280,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "pt": [
@@ -300,7 +321,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "ro": [
@@ -338,7 +362,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "ru": [
@@ -376,7 +403,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "tr": [
@@ -414,7 +444,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "zh": [
@@ -452,7 +485,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "zh_LZH": [
@@ -490,7 +526,10 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ],
 
   "zh_TW": [
@@ -528,6 +567,9 @@
     "aiThinkingMedium",
     "aiThinkingHigh",
     "aiSectionThinking",
-    "aiSectionTools"
+    "aiSectionTools",
+    "aiChatRegenerateFromHereConfirmTitle",
+    "aiChatRegenerateFromHereConfirmBody",
+    "aiChatEditUserMessageTitle"
   ]
 }
