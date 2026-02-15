@@ -14,6 +14,7 @@ class AiChatHistoryEntry {
     required this.updatedAt,
     required this.messages,
     required this.completed,
+    this.conversationV2,
   });
 
   final String id;
@@ -21,14 +22,22 @@ class AiChatHistoryEntry {
   final String model;
   final int createdAt;
   final int updatedAt;
+
+  /// The active linear view (for backward compatibility and UI convenience).
   final List<ChatMessage> messages;
+
   final bool completed;
+
+  /// Full conversation tree (schemaVersion=2). Older clients will ignore it and
+  /// only read [messages].
+  final Map<String, dynamic>? conversationV2;
 
   AiChatHistoryEntry copyWith({
     List<ChatMessage>? messages,
     int? updatedAt,
     bool? completed,
     String? model,
+    Map<String, dynamic>? conversationV2,
   }) {
     return AiChatHistoryEntry(
       id: id,
@@ -38,6 +47,7 @@ class AiChatHistoryEntry {
       updatedAt: updatedAt ?? this.updatedAt,
       messages: messages ?? this.messages,
       completed: completed ?? this.completed,
+      conversationV2: conversationV2 ?? this.conversationV2,
     );
   }
 
@@ -50,6 +60,7 @@ class AiChatHistoryEntry {
       'updatedAt': updatedAt,
       'completed': completed,
       'messages': messages.map((m) => m.toMap()).toList(growable: false),
+      if (conversationV2 != null) 'conversationV2': conversationV2,
     };
   }
 
@@ -68,6 +79,15 @@ class AiChatHistoryEntry {
       }
     }
 
+    Map<String, dynamic>? conversationV2;
+    final rawConversationV2 = json['conversationV2'];
+    if (rawConversationV2 is Map<String, dynamic>) {
+      conversationV2 = rawConversationV2;
+    } else if (rawConversationV2 is Map) {
+      conversationV2 = rawConversationV2
+          .map((key, value) => MapEntry(key.toString(), value));
+    }
+
     return AiChatHistoryEntry(
       id: json['id']?.toString() ?? '',
       serviceId: json['serviceId']?.toString() ?? '',
@@ -80,6 +100,7 @@ class AiChatHistoryEntry {
           : DateTime.now().millisecondsSinceEpoch,
       completed: json['completed'] == true,
       messages: messages,
+      conversationV2: conversationV2,
     );
   }
 }

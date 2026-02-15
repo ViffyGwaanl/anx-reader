@@ -878,7 +878,7 @@
   "aiThinkingHigh": "高",
   "aiSectionThinking": "思考",
   "aiSectionTools": "工具",
-  "aiChatRegenerateFromHereConfirmTitle": "从这里重新生成？",
-  "aiChatRegenerateFromHereConfirmBody": "这将丢弃该消息之后的对话，并从此处重新生成。是否继续？",
+  "aiChatRegenerateFromHereConfirmTitle": "从这里创建分支？",
+  "aiChatRegenerateFromHereConfirmBody": "将基于该消息创建一个新的对话分支继续生成；旧版本及其后续对话都会保留，你可以用消息下方的左右切换回滚。是否继续？",
   "aiChatEditUserMessageTitle": "编辑消息"
 }

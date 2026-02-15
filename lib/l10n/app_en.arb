@@ -878,7 +878,7 @@
   "aiThinkingHigh": "High",
   "aiSectionThinking": "Thinking",
   "aiSectionTools": "Tools",
-  "aiChatRegenerateFromHereConfirmTitle": "Regenerate from here?",
-  "aiChatRegenerateFromHereConfirmBody": "This will discard the conversation after this message and regenerate from this point. Continue?",
+  "aiChatRegenerateFromHereConfirmTitle": "Create a branch from here?",
+  "aiChatRegenerateFromHereConfirmBody": "This will create a new conversation branch from this message. The old version and its subsequent conversation will be kept, and you can switch back via the left/right variant switcher. Continue?",
   "aiChatEditUserMessageTitle": "Edit message"
 }

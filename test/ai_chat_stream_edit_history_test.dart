@@ -88,7 +88,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
 
     // Confirm dialog.
-    expect(find.text('从这里重新生成？'), findsOneWidget);
+    expect(find.text('从这里创建分支？'), findsOneWidget);
     await tester.tap(
       find.descendant(
         of: find.byType(AlertDialog),

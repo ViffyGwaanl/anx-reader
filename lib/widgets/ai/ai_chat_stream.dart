@@ -1260,25 +1260,22 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   }
 
   Widget _buildMessageList(List<ChatMessage> messages) {
-    final items = _buildChatItems(messages);
     final lastHumanIndex = _findLastHumanIndex(messages);
 
     return ListView.builder(
       controller: _scrollController,
-      itemCount: items.length,
+      itemCount: messages.length,
       itemBuilder: (context, index) {
-        final item = items[index];
-        if (item is _UserChatItem) {
-          return _buildUserMessageItem(item);
-        }
-        if (item is _AssistantGroupChatItem) {
-          return _buildAssistantGroupItem(
-            item,
-            lastHumanIndex: lastHumanIndex,
-            lastMessage: messages.isEmpty ? null : messages.last,
-          );
-        }
-        return const SizedBox.shrink();
+        final message = messages[index];
+        final isStreaming =
+            _messageStream != null && index == messages.length - 1;
+        return _buildLinearMessageItem(
+          messages,
+          message,
+          index,
+          isStreaming,
+          lastHumanIndex: lastHumanIndex,
+        );
       },
     );
   }
@@ -1343,6 +1340,151 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
       }
     }
     return null;
+  }
+
+  int? _findPrevHumanIndex(List<ChatMessage> messages, int fromIndex) {
+    for (var i = fromIndex; i >= 0; i--) {
+      if (messages[i] is HumanChatMessage) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  Widget _buildVariantSwitcher(
+    int messageIndex,
+    bool isStreaming,
+  ) {
+    final notifier = ref.read(aiChatProvider.notifier);
+    final count = notifier.variantCountForMessageIndex(messageIndex);
+    if (count <= 1) {
+      return const SizedBox.shrink();
+    }
+
+    final selected = notifier.selectedVariantIndexForMessageIndex(messageIndex);
+    final canNavigate = !_isStreaming && !isStreaming;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.chevron_left, size: 18),
+          onPressed: canNavigate && selected > 0
+              ? () {
+                  notifier.switchVariantAtMessageIndexAndPersist(
+                    messageIndex,
+                    -1,
+                    ref,
+                  );
+                }
+              : null,
+        ),
+        Text('${selected + 1}/$count'),
+        IconButton(
+          icon: const Icon(Icons.chevron_right, size: 18),
+          onPressed: canNavigate && selected < count - 1
+              ? () {
+                  notifier.switchVariantAtMessageIndexAndPersist(
+                    messageIndex,
+                    1,
+                    ref,
+                  );
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLinearMessageItem(
+    List<ChatMessage> allMessages,
+    ChatMessage message,
+    int index,
+    bool isStreaming, {
+    required int? lastHumanIndex,
+  }) {
+    final isUser = message is HumanChatMessage;
+    final content = message.contentAsString;
+    final isLongMessage = content.length > 300;
+
+    final prevHumanIndex =
+        isUser ? index : _findPrevHumanIndex(allMessages, index);
+    final isLastTurn =
+        prevHumanIndex != null && prevHumanIndex == lastHumanIndex;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: 8.0,
+        left: isUser ? 8.0 : 0,
+        right: isUser ? 0 : 8.0,
+      ),
+      child: Row(
+        mainAxisAlignment:
+            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isUser
+                    ? Theme.of(context).colorScheme.surfaceContainer
+                    : Theme.of(context).colorScheme.surface,
+                borderRadius: BorderRadius.only(
+                  topLeft: isUser ? const Radius.circular(12) : Radius.zero,
+                  topRight: isUser ? Radius.zero : const Radius.circular(12),
+                  bottomLeft: isUser ? Radius.zero : const Radius.circular(12),
+                  bottomRight: isUser ? const Radius.circular(12) : Radius.zero,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  isUser
+                      ? _buildCollapsibleText(content, isLongMessage)
+                      : _buildAssistantSections(content, isStreaming),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      _buildVariantSwitcher(index, isStreaming),
+                      const SizedBox(width: 4),
+                      if (isUser) ...[
+                        TextButton(
+                          onPressed: () => _showEditUserMessageDialog(
+                            index,
+                            content,
+                          ),
+                          child: Text(L10n.of(context).commonEdit),
+                        ),
+                        TextButton(
+                          onPressed: () => _copyPlainText(content),
+                          child: Text(L10n.of(context).commonCopy),
+                        ),
+                      ] else ...[
+                        if (prevHumanIndex != null)
+                          TextButton(
+                            onPressed: () => _confirmRegenerateFromUserIndex(
+                              prevHumanIndex,
+                              isLastTurn: isLastTurn,
+                            ),
+                            child: Text(L10n.of(context).aiRegenerate),
+                          ),
+                        TextButton(
+                          onPressed: () => _copyMessageContent(content),
+                          child: Text(L10n.of(context).commonCopy),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
   }
 
   Widget _buildUserMessageItem(_UserChatItem item) {
