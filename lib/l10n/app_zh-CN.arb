@@ -826,6 +826,35 @@
   "commonInputCannotBeEmpty": "输入不能为空",
   "commonAddSuccess": "添加成功",
   "commonSaveSuccess": "保存成功",
+  "commonAdd": "添加",
+  "settingsAiProviderCenterTitle": "供应商中心",
+  "settingsAiProviderCenterDesc": "Cherry 风格供应商配置",
+  "settingsAiProviderCenterAddTitle": "添加供应商",
+  "settingsAiProviderCenterProviderNameLabel": "供应商名称",
+  "settingsAiProviderCenterProviderNameHint": "例如：我的网关",
+  "settingsAiProviderCenterUntitledProvider": "未命名供应商",
+  "settingsAiProviderCenterProviderTypeLabel": "供应商类型",
+  "settingsAiProviderCenterTypeOpenAICompatible": "OpenAI 兼容",
+  "settingsAiProviderCenterTypeAnthropic": "Anthropic",
+  "settingsAiProviderCenterTypeGemini": "Gemini",
+  "settingsAiProviderCenterDefaultApplied": "已设为默认：{name}",
+  "@settingsAiProviderCenterDefaultApplied": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "settingsAiProviderCenterUrlLabel": "URL（baseUrl 或 endpoint）",
+  "settingsAiProviderCenterEffectiveBaseUrlLabel": "实际 baseUrl",
+  "settingsAiProviderCenterModelLabel": "模型",
+  "settingsAiProviderCenterApiKeyLabel": "API Key",
+  "settingsAiProviderCenterSetAsDefault": "设为默认",
+  "settingsAiProviderCenterDeleteTitle": "删除供应商？",
+  "settingsAiProviderCenterDeleteBody": "将删除“{name}”及其本地配置，且无法撤销。",
+  "@settingsAiProviderCenterDeleteBody": {
+    "placeholders": {
+      "name": {}
+    }
+  },
   "aiShowAtBottom": "在底部显示",
   "aiShowAtRight": "在右侧显示"
 }

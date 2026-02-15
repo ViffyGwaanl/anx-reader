@@ -826,6 +826,35 @@
   "commonInputCannotBeEmpty": "Input cannot be empty",
   "commonAddSuccess": "Added successfully",
   "commonSaveSuccess": "Saved successfully",
+  "commonAdd": "Add",
+  "settingsAiProviderCenterTitle": "Provider Center",
+  "settingsAiProviderCenterDesc": "Cherry-style provider configuration",
+  "settingsAiProviderCenterAddTitle": "Add Provider",
+  "settingsAiProviderCenterProviderNameLabel": "Provider Name",
+  "settingsAiProviderCenterProviderNameHint": "e.g. My Gateway",
+  "settingsAiProviderCenterUntitledProvider": "Untitled Provider",
+  "settingsAiProviderCenterProviderTypeLabel": "Provider Type",
+  "settingsAiProviderCenterTypeOpenAICompatible": "OpenAI-compatible",
+  "settingsAiProviderCenterTypeAnthropic": "Anthropic",
+  "settingsAiProviderCenterTypeGemini": "Gemini",
+  "settingsAiProviderCenterDefaultApplied": "Default provider set to: {name}",
+  "@settingsAiProviderCenterDefaultApplied": {
+    "placeholders": {
+      "name": {}
+    }
+  },
+  "settingsAiProviderCenterUrlLabel": "URL (baseUrl or endpoint)",
+  "settingsAiProviderCenterEffectiveBaseUrlLabel": "Effective baseUrl",
+  "settingsAiProviderCenterModelLabel": "Model",
+  "settingsAiProviderCenterApiKeyLabel": "API Key",
+  "settingsAiProviderCenterSetAsDefault": "Set as default",
+  "settingsAiProviderCenterDeleteTitle": "Delete Provider?",
+  "settingsAiProviderCenterDeleteBody": "This will delete \"{name}\" and its local config. This cannot be undone.",
+  "@settingsAiProviderCenterDeleteBody": {
+    "placeholders": {
+      "name": {}
+    }
+  },
   "aiShowAtBottom": "Show at Bottom",
   "aiShowAtRight": "Show at Right"
 }

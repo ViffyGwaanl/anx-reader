@@ -140,8 +140,8 @@ class _AISettingsState extends ConsumerState<AISettings> {
           ),
           CustomSettingsTile(
             child: SettingsTile.navigation(
-              title: const Text('供应商中心 / Provider Center'),
-              description: const Text('Cherry-style provider configuration'),
+              title: Text(l10n.settingsAiProviderCenterTitle),
+              description: Text(l10n.settingsAiProviderCenterDesc),
               onPressed: (context) {
                 Navigator.of(context).push(
                   MaterialPageRoute(

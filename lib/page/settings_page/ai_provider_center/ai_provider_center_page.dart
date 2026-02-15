@@ -1,9 +1,10 @@
 import 'package:anx_reader/config/shared_preference_provider.dart';
-// l10n import intentionally omitted
+import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/models/ai_provider_meta.dart';
 import 'package:anx_reader/page/settings_page/ai_provider_center/ai_provider_detail_page.dart';
 import 'package:anx_reader/service/ai/ai_services.dart';
 import 'package:flutter/material.dart';
+import 'package:uuid/uuid.dart';
 
 class AiProviderCenterPage extends StatefulWidget {
   const AiProviderCenterPage({super.key});
@@ -15,6 +16,8 @@ class AiProviderCenterPage extends StatefulWidget {
 class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
   late final List<AiServiceOption> _builtInOptions;
   late final Future<void> _prefsReady;
+
+  static const _uuid = Uuid();
 
   @override
   void initState() {
@@ -66,18 +69,120 @@ class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
     );
   }
 
+  String _fallbackProviderId(List<AiProviderMeta> providers) {
+    // Prefer OpenAI built-in if enabled.
+    for (final p in providers) {
+      if (p.id == 'openai' && p.enabled) return p.id;
+    }
+    // Otherwise pick the first enabled.
+    for (final p in providers) {
+      if (p.enabled) return p.id;
+    }
+    // Worst case - keep existing behavior.
+    return 'openai';
+  }
+
+  Future<void> _addProvider() async {
+    final l10n = L10n.of(context);
+
+    final nameController = TextEditingController();
+    var type = AiProviderType.openaiCompatible;
+
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(l10n.settingsAiProviderCenterAddTitle),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameController,
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    labelText: l10n.settingsAiProviderCenterProviderNameLabel,
+                    hintText: l10n.settingsAiProviderCenterProviderNameHint,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<AiProviderType>(
+                  value: type,
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    labelText: l10n.settingsAiProviderCenterProviderTypeLabel,
+                  ),
+                  items: AiProviderType.values
+                      .map(
+                        (t) => DropdownMenuItem(
+                          value: t,
+                          child: Text(_typeLabel(t, l10n)),
+                        ),
+                      )
+                      .toList(growable: false),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    type = v;
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.commonAdd),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (ok != true || !mounted) return;
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final name = nameController.text.trim().isEmpty
+          ? l10n.settingsAiProviderCenterUntitledProvider
+          : nameController.text.trim();
+
+      final meta = AiProviderMeta(
+        id: _uuid.v4(),
+        name: name,
+        type: type,
+        enabled: true,
+        isBuiltIn: false,
+        createdAt: now,
+        updatedAt: now,
+        logoKey: null,
+      );
+
+      setState(() {
+        Prefs().upsertAiProviderMeta(meta);
+      });
+
+      _openProvider(meta);
+    } finally {
+      nameController.dispose();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return FutureBuilder<void>(
       future: _prefsReady,
       builder: (context, snapshot) {
+        final l10n = L10n.of(context);
+
         if (snapshot.hasError) {
           return Scaffold(
             appBar: AppBar(
-              title: const Text('供应商中心'),
+              title: Text(l10n.settingsAiProviderCenterTitle),
             ),
             body: Center(
-              child: Text('加载失败：${snapshot.error}'),
+              child: Text('${l10n.commonFailed}: ${snapshot.error}'),
             ),
           );
         }
@@ -85,7 +190,7 @@ class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
         if (snapshot.connectionState != ConnectionState.done) {
           return Scaffold(
             appBar: AppBar(
-              title: const Text('供应商中心'),
+              title: Text(l10n.settingsAiProviderCenterTitle),
             ),
             body: const Center(
               child: CircularProgressIndicator(),
@@ -98,7 +203,12 @@ class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('供应商中心'),
+            title: Text(l10n.settingsAiProviderCenterTitle),
+          ),
+          floatingActionButton: FloatingActionButton(
+            onPressed: _addProvider,
+            tooltip: l10n.commonAdd,
+            child: const Icon(Icons.add),
           ),
           body: ListView.separated(
             itemCount: providers.length,
@@ -108,6 +218,7 @@ class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
               final isSelected = p.id == selectedId;
 
               return ListTile(
+                enabled: p.enabled,
                 leading: p.logoKey == null
                     ? const Icon(Icons.hub_outlined)
                     : Image.asset(
@@ -118,7 +229,7 @@ class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
                             const Icon(Icons.hub_outlined),
                       ),
                 title: Text(p.name),
-                subtitle: Text(_typeLabel(p.type)),
+                subtitle: Text(_typeLabel(p.type, l10n)),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -137,6 +248,12 @@ class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
                               updatedAt: DateTime.now().millisecondsSinceEpoch,
                             ),
                           );
+
+                          if (!value && isSelected) {
+                            final next =
+                                _fallbackProviderId(Prefs().aiProvidersV1);
+                            Prefs().selectedAiService = next;
+                          }
                         });
                       },
                     ),
@@ -152,7 +269,9 @@ class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
                   });
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('已设为默认：${p.name}'),
+                      content: Text(
+                        l10n.settingsAiProviderCenterDefaultApplied(p.name),
+                      ),
                       duration: const Duration(milliseconds: 800),
                     ),
                   );
@@ -165,14 +284,14 @@ class _AiProviderCenterPageState extends State<AiProviderCenterPage> {
     );
   }
 
-  String _typeLabel(AiProviderType type) {
+  String _typeLabel(AiProviderType type, L10n l10n) {
     switch (type) {
       case AiProviderType.openaiCompatible:
-        return 'OpenAI-compatible';
+        return l10n.settingsAiProviderCenterTypeOpenAICompatible;
       case AiProviderType.anthropic:
-        return 'Anthropic';
+        return l10n.settingsAiProviderCenterTypeAnthropic;
       case AiProviderType.gemini:
-        return 'Gemini';
+        return l10n.settingsAiProviderCenterTypeGemini;
     }
   }
 }
