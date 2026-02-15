@@ -54,6 +54,10 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   final ScrollController _scrollController = ScrollController();
   bool _isStreaming = false;
 
+  // For each user turn, the assistant may have multiple generated variants.
+  // We keep a lightweight UI-only selection index per turn.
+  final Map<int, int> _selectedVariantByUserIndex = {};
+
   late final List<AiServiceOption> _builtInOptions;
   late final Map<String, AiServiceOption> _builtInById;
   late List<AiProviderMeta> _providers;
@@ -1143,38 +1147,99 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   }
 
   Widget _buildMessageList(List<ChatMessage> messages) {
+    final items = _buildChatItems(messages);
+    final lastHumanIndex = _findLastHumanIndex(messages);
+
     return ListView.builder(
       controller: _scrollController,
-      itemCount: messages.length,
+      itemCount: items.length,
       itemBuilder: (context, index) {
-        final message = messages[index];
-        final isStreaming =
-            _messageStream != null && index == messages.length - 1;
-        return _buildMessageItem(message, index, isStreaming);
+        final item = items[index];
+        if (item is _UserChatItem) {
+          return _buildUserMessageItem(item);
+        }
+        if (item is _AssistantGroupChatItem) {
+          return _buildAssistantGroupItem(
+            item,
+            lastHumanIndex: lastHumanIndex,
+            lastMessage: messages.isEmpty ? null : messages.last,
+          );
+        }
+        return const SizedBox.shrink();
       },
     );
   }
 
-  Widget _buildMessageItem(
-    ChatMessage message,
-    int index,
-    bool isStreaming,
-  ) {
-    final isUser = message is HumanChatMessage;
-    final content = message.contentAsString;
-    final parsed = parseReasoningContent(content);
+  List<_ChatItem> _buildChatItems(List<ChatMessage> messages) {
+    final items = <_ChatItem>[];
+    var i = 0;
+    while (i < messages.length) {
+      final message = messages[i];
+      if (message is HumanChatMessage) {
+        items.add(_UserChatItem(index: i, message: message));
+
+        final variants = <AIChatMessage>[];
+        var j = i + 1;
+        while (j < messages.length && messages[j] is AIChatMessage) {
+          variants.add(messages[j] as AIChatMessage);
+          j++;
+        }
+        if (variants.isNotEmpty) {
+          items.add(
+            _AssistantGroupChatItem(
+              groupKey: i,
+              userIndex: i,
+              variants: variants,
+            ),
+          );
+        }
+        i = j;
+        continue;
+      }
+
+      if (message is AIChatMessage) {
+        // Orphan assistant messages (should be rare). Group them to keep the UI
+        // consistent.
+        final variants = <AIChatMessage>[];
+        var j = i;
+        while (j < messages.length && messages[j] is AIChatMessage) {
+          variants.add(messages[j] as AIChatMessage);
+          j++;
+        }
+        items.add(
+          _AssistantGroupChatItem(
+            groupKey: -(i + 1),
+            userIndex: null,
+            variants: variants,
+          ),
+        );
+        i = j;
+        continue;
+      }
+
+      i++;
+    }
+
+    return items;
+  }
+
+  int? _findLastHumanIndex(List<ChatMessage> messages) {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i] is HumanChatMessage) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  Widget _buildUserMessageItem(_UserChatItem item) {
+    final content = item.message.contentAsString;
     final isLongMessage = content.length > 300;
-    final lastAssistantMessage = _getLastAssistantMessage();
 
     return Padding(
-      padding: EdgeInsets.only(
-        bottom: 8.0,
-        left: isUser ? 8.0 : 0,
-        right: isUser ? 0 : 8.0,
-      ),
+      padding: const EdgeInsets.only(bottom: 8.0, left: 8.0),
       child: Row(
-        mainAxisAlignment:
-            isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.end,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(width: 8),
@@ -1182,37 +1247,110 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isUser
-                    ? Theme.of(context).colorScheme.surfaceContainer
-                    : Theme.of(context).colorScheme.surface,
-                borderRadius: BorderRadius.only(
-                  topLeft: isUser ? const Radius.circular(12) : Radius.zero,
-                  topRight: isUser ? Radius.zero : const Radius.circular(12),
-                  bottomLeft: isUser ? Radius.zero : const Radius.circular(12),
-                  bottomRight: isUser ? const Radius.circular(12) : Radius.zero,
+                color: Theme.of(context).colorScheme.surfaceContainer,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.zero,
+                  bottomLeft: Radius.zero,
+                  bottomRight: Radius.circular(12),
+                ),
+              ),
+              child: _buildCollapsibleText(content, isLongMessage),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssistantGroupItem(
+    _AssistantGroupChatItem item, {
+    required int? lastHumanIndex,
+    required ChatMessage? lastMessage,
+  }) {
+    var selected = _selectedVariantByUserIndex[item.groupKey] ??
+        (item.variants.length - 1);
+    if (selected < 0) selected = 0;
+    if (selected >= item.variants.length) selected = item.variants.length - 1;
+
+    final message = item.variants[selected];
+    final content = message.contentAsString;
+    final isStreaming =
+        _messageStream != null && identical(lastMessage, message);
+
+    final canNavigateVariants =
+        item.variants.length > 1 && !_isStreaming && !isStreaming;
+
+    final isLastTurn =
+        item.userIndex != null && item.userIndex == lastHumanIndex;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0, right: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: const BorderRadius.only(
+                  topRight: Radius.circular(12),
+                  bottomLeft: Radius.circular(12),
                 ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  isUser
-                      ? _buildCollapsibleText(content, isLongMessage)
-                      : _buildAssistantSections(content, isStreaming),
-                  if (!isUser)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (identical(message, lastAssistantMessage))
-                          TextButton(
-                            onPressed: _regenerateLastMessage,
-                            child: Text(L10n.of(context).aiRegenerate),
-                          ),
-                        TextButton(
-                          onPressed: () => _copyMessageContent(content),
-                          child: Text(L10n.of(context).commonCopy),
+                  _buildAssistantSections(content, isStreaming),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      if (item.variants.length > 1)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.chevron_left, size: 18),
+                              onPressed: canNavigateVariants && selected > 0
+                                  ? () {
+                                      setState(() {
+                                        _selectedVariantByUserIndex[
+                                            item.groupKey] = selected - 1;
+                                      });
+                                    }
+                                  : null,
+                            ),
+                            Text('${selected + 1}/${item.variants.length}'),
+                            IconButton(
+                              icon: const Icon(Icons.chevron_right, size: 18),
+                              onPressed: canNavigateVariants &&
+                                      selected < item.variants.length - 1
+                                  ? () {
+                                      setState(() {
+                                        _selectedVariantByUserIndex[
+                                            item.groupKey] = selected + 1;
+                                      });
+                                    }
+                                  : null,
+                            ),
+                            const SizedBox(width: 4),
+                          ],
                         ),
-                      ],
-                    ),
+                      if (isLastTurn)
+                        TextButton(
+                          onPressed: _regenerateLastMessage,
+                          child: Text(L10n.of(context).aiRegenerate),
+                        ),
+                      TextButton(
+                        onPressed: () => _copyMessageContent(content),
+                        child: Text(L10n.of(context).commonCopy),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -1390,6 +1528,41 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
 
     return _CollapsibleText(text: text);
   }
+}
+
+abstract class _ChatItem {
+  const _ChatItem();
+}
+
+class _UserChatItem extends _ChatItem {
+  const _UserChatItem({
+    required this.index,
+    required this.message,
+  });
+
+  final int index;
+  final HumanChatMessage message;
+}
+
+class _AssistantGroupChatItem extends _ChatItem {
+  const _AssistantGroupChatItem({
+    required this.groupKey,
+    required this.userIndex,
+    required this.variants,
+  });
+
+  /// Stable within the current in-memory message list.
+  ///
+  /// - For normal turns: equals [userIndex].
+  /// - For orphan assistant groups: negative.
+  final int groupKey;
+
+  /// The index of the user message this assistant group belongs to.
+  ///
+  /// If null, this is an orphan assistant group.
+  final int? userIndex;
+
+  final List<AIChatMessage> variants;
 }
 
 class _CollapsibleText extends StatefulWidget {
