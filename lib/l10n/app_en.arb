@@ -866,5 +866,14 @@
     "placeholders": {
       "count": {}
     }
-  }
+  },
+  "settingsAiProviderCenterIncludeThoughtsTitle": "Include thought summary",
+  "settingsAiProviderCenterIncludeThoughtsDesc": "When enabled, Gemini returns a thought summary that can be shown in the Thinking section. This may increase cost and latency.",
+  "aiThinkingTitle": "Thinking level",
+  "aiThinkingOff": "Off",
+  "aiThinkingAuto": "Auto",
+  "aiThinkingMinimal": "Minimal",
+  "aiThinkingLow": "Low",
+  "aiThinkingMedium": "Medium",
+  "aiThinkingHigh": "High"
 }

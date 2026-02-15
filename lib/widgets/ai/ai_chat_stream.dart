@@ -8,6 +8,7 @@ import 'package:anx_reader/providers/ai_history.dart';
 import 'package:anx_reader/service/ai/ai_services.dart';
 import 'package:anx_reader/service/ai/ai_history.dart';
 import 'package:anx_reader/models/ai_provider_meta.dart';
+import 'package:anx_reader/enums/ai_thinking_mode.dart';
 import 'package:anx_reader/service/ai/index.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/utils/ai_reasoning_parser.dart';
@@ -236,6 +237,169 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     setState(() {
       _selectedProviderId = providerId;
     });
+  }
+
+  AiThinkingMode _thinkingModeForProvider(String providerId) {
+    final existing = Prefs().getAiConfig(providerId);
+    return aiThinkingModeFromString(existing['thinking_mode'] ?? 'off');
+  }
+
+  bool _includeThoughtsForProvider(AiProviderMeta provider) {
+    if (provider.type != AiProviderType.gemini) {
+      return false;
+    }
+    final existing = Prefs().getAiConfig(provider.id);
+    final raw = (existing['include_thoughts'] ?? 'true').trim().toLowerCase();
+    return raw != 'false' && raw != '0' && raw != 'no';
+  }
+
+  String _thinkingModeLabel(AiThinkingMode mode, L10n l10n) {
+    switch (mode) {
+      case AiThinkingMode.off:
+        return l10n.aiThinkingOff;
+      case AiThinkingMode.auto:
+        return l10n.aiThinkingAuto;
+      case AiThinkingMode.minimal:
+        return l10n.aiThinkingMinimal;
+      case AiThinkingMode.low:
+        return l10n.aiThinkingLow;
+      case AiThinkingMode.medium:
+        return l10n.aiThinkingMedium;
+      case AiThinkingMode.high:
+        return l10n.aiThinkingHigh;
+    }
+  }
+
+  List<AiThinkingMode> _supportedThinkingModes(AiProviderMeta provider) {
+    final stored = Prefs().getAiConfig(provider.id);
+    final model = (stored['model'] ?? '').trim().toLowerCase();
+
+    switch (provider.type) {
+      case AiProviderType.openaiCompatible:
+        return const [
+          AiThinkingMode.off,
+          AiThinkingMode.auto,
+          AiThinkingMode.minimal,
+          AiThinkingMode.low,
+          AiThinkingMode.medium,
+          AiThinkingMode.high,
+        ];
+      case AiProviderType.anthropic:
+        return const [
+          AiThinkingMode.off,
+          AiThinkingMode.auto,
+          AiThinkingMode.low,
+          AiThinkingMode.medium,
+          AiThinkingMode.high,
+        ];
+      case AiProviderType.gemini:
+        // Best-effort gating based on Gemini official doc.
+        if (model.contains('gemini-3-pro')) {
+          return const [
+            AiThinkingMode.auto,
+            AiThinkingMode.low,
+            AiThinkingMode.high,
+          ];
+        }
+        if (model.contains('gemini-2.5-pro')) {
+          // Doc says: cannot disable thinking.
+          return const [
+            AiThinkingMode.auto,
+            AiThinkingMode.low,
+            AiThinkingMode.medium,
+            AiThinkingMode.high,
+          ];
+        }
+        return const [
+          AiThinkingMode.off,
+          AiThinkingMode.auto,
+          AiThinkingMode.minimal,
+          AiThinkingMode.low,
+          AiThinkingMode.medium,
+          AiThinkingMode.high,
+        ];
+    }
+  }
+
+  IconData _thinkingIcon(AiThinkingMode mode) {
+    switch (mode) {
+      case AiThinkingMode.off:
+        return Icons.lightbulb_outline;
+      case AiThinkingMode.auto:
+        return Icons.auto_awesome;
+      case AiThinkingMode.minimal:
+        return Icons.lightbulb_outline;
+      case AiThinkingMode.low:
+        return Icons.lightbulb_outline;
+      case AiThinkingMode.medium:
+        return Icons.lightbulb;
+      case AiThinkingMode.high:
+        return Icons.lightbulb;
+    }
+  }
+
+  Future<void> _editThinkingMode() async {
+    if (_isStreaming) return;
+
+    final l10n = L10n.of(context);
+    final provider = _currentProvider;
+    final supported = _supportedThinkingModes(provider);
+
+    final current = _thinkingModeForProvider(provider.id);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(12),
+            children: [
+              ListTile(
+                title: Text(l10n.aiThinkingTitle),
+                subtitle: Text(provider.name),
+              ),
+              if (provider.type == AiProviderType.gemini)
+                SwitchListTile.adaptive(
+                  title:
+                      Text(l10n.settingsAiProviderCenterIncludeThoughtsTitle),
+                  subtitle:
+                      Text(l10n.settingsAiProviderCenterIncludeThoughtsDesc),
+                  value: _includeThoughtsForProvider(provider),
+                  onChanged: (v) {
+                    final next = Map<String, String>.from(
+                      Prefs().getAiConfig(provider.id),
+                    );
+                    next['include_thoughts'] = v ? 'true' : 'false';
+                    Prefs().saveAiConfig(provider.id, next);
+                    setState(() {});
+                  },
+                ),
+              for (final mode in AiThinkingMode.values)
+                RadioListTile<AiThinkingMode>(
+                  value: mode,
+                  groupValue: current,
+                  title: Text(_thinkingModeLabel(mode, l10n)),
+                  secondary: Icon(_thinkingIcon(mode)),
+                  onChanged: supported.contains(mode)
+                      ? (v) {
+                          if (v == null) return;
+                          final next = Map<String, String>.from(
+                            Prefs().getAiConfig(provider.id),
+                          );
+                          next['thinking_mode'] = aiThinkingModeToString(v);
+                          Prefs().saveAiConfig(provider.id, next);
+                          setState(() {});
+                          Navigator.of(context).pop();
+                        }
+                      : null,
+                ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _editCurrentModel() async {
@@ -781,6 +945,16 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                     children: [
                       Flexible(child: aiService),
                       const SizedBox(width: 6),
+                      IconButton(
+                        icon: Icon(
+                          _thinkingIcon(
+                            _thinkingModeForProvider(_selectedProviderId),
+                          ),
+                          size: 18,
+                        ),
+                        tooltip: L10n.of(context).aiThinkingTitle,
+                        onPressed: _editThinkingMode,
+                      ),
                       IconButton(
                         icon: const Icon(Icons.tune, size: 18),
                         tooltip: L10n.of(context).aiChatEditModelTitle,

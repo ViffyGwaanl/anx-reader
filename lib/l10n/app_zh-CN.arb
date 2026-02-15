@@ -866,5 +866,14 @@
     "placeholders": {
       "count": {}
     }
-  }
+  },
+  "settingsAiProviderCenterIncludeThoughtsTitle": "包含思考摘要",
+  "settingsAiProviderCenterIncludeThoughtsDesc": "开启后，Gemini 会返回可用于“思考”区域展示的思考摘要，可能会增加费用与首字延迟。",
+  "aiThinkingTitle": "思考强度",
+  "aiThinkingOff": "关闭",
+  "aiThinkingAuto": "自动",
+  "aiThinkingMinimal": "极低",
+  "aiThinkingLow": "低",
+  "aiThinkingMedium": "中",
+  "aiThinkingHigh": "高"
 }

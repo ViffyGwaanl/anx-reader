@@ -29,6 +29,8 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
   late final TextEditingController _apiKeyController;
   bool _obscureApiKey = true;
 
+  bool _includeThoughts = true;
+
   bool _isFetchingModels = false;
   List<String> _cachedModels = const [];
 
@@ -53,6 +55,14 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
           .trim(),
     );
 
+    if (_provider.type == AiProviderType.gemini) {
+      final raw = (stored['include_thoughts'] ?? 'true').trim().toLowerCase();
+      _includeThoughts = raw != 'false' && raw != '0' && raw != 'no';
+    } else {
+      final raw = (stored['include_thoughts'] ?? 'false').trim().toLowerCase();
+      _includeThoughts = raw == 'true' || raw == '1' || raw == 'yes';
+    }
+
     final modelsCache = Prefs().getAiModelsCacheV1(_provider.id);
     _cachedModels = modelsCache?.models ?? const [];
   }
@@ -67,11 +77,19 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
   }
 
   Map<String, String> _buildConfigMap() {
-    return <String, String>{
+    final map = <String, String>{
       'url': _urlController.text.trim(),
       'model': _modelController.text.trim(),
       'api_key': _apiKeyController.text.trim(),
     };
+
+    // Gemini thinking-related configuration.
+    // Default is enabled (per user preference).
+    if (_provider.type == AiProviderType.gemini) {
+      map['include_thoughts'] = _includeThoughts ? 'true' : 'false';
+    }
+
+    return map;
   }
 
   void _save() {
@@ -315,6 +333,20 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
             label: Text(l10n.settingsAiProviderCenterFetchModels),
           ),
           const SizedBox(height: 12),
+          if (_provider.type == AiProviderType.gemini)
+            SwitchListTile.adaptive(
+              contentPadding: EdgeInsets.zero,
+              title: Text(l10n.settingsAiProviderCenterIncludeThoughtsTitle),
+              subtitle: Text(l10n.settingsAiProviderCenterIncludeThoughtsDesc),
+              value: _includeThoughts,
+              onChanged: (v) {
+                setState(() {
+                  _includeThoughts = v;
+                });
+              },
+            ),
+          if (_provider.type == AiProviderType.gemini)
+            const SizedBox(height: 12),
           TextField(
             controller: _apiKeyController,
             obscureText: _obscureApiKey,
