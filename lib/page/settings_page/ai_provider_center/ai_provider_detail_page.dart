@@ -1,6 +1,7 @@
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/models/ai_provider_meta.dart';
+import 'package:anx_reader/service/ai/ai_models_service.dart';
 import 'package:anx_reader/service/ai/ai_services.dart';
 import 'package:anx_reader/service/ai/langchain_ai_config.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,9 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
   late final TextEditingController _apiKeyController;
   bool _obscureApiKey = true;
 
+  bool _isFetchingModels = false;
+  List<String> _cachedModels = const [];
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +52,9 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
       text: (stored['api_key'] ?? widget.builtInOption?.defaultApiKey ?? '')
           .trim(),
     );
+
+    final modelsCache = Prefs().getAiModelsCacheV1(_provider.id);
+    _cachedModels = modelsCache?.models ?? const [];
   }
 
   @override
@@ -59,14 +66,18 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
     super.dispose();
   }
 
-  void _save() {
-    final l10n = L10n.of(context);
-
-    final map = <String, String>{
+  Map<String, String> _buildConfigMap() {
+    return <String, String>{
       'url': _urlController.text.trim(),
       'model': _modelController.text.trim(),
       'api_key': _apiKeyController.text.trim(),
     };
+  }
+
+  void _save() {
+    final l10n = L10n.of(context);
+
+    final map = _buildConfigMap();
 
     Prefs().saveAiConfig(_provider.id, map);
 
@@ -112,6 +123,50 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
       if (p.enabled) return p.id;
     }
     return 'openai';
+  }
+
+  Future<void> _fetchModels() async {
+    final l10n = L10n.of(context);
+
+    if (_isFetchingModels) return;
+
+    setState(() {
+      _isFetchingModels = true;
+    });
+
+    try {
+      final models = await AiModelsService.fetchModels(
+        provider: _provider,
+        rawConfig: _buildConfigMap(),
+      );
+
+      if (!mounted) return;
+
+      if (models.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(l10n.settingsAiProviderCenterFetchModelsEmpty)),
+        );
+      } else {
+        Prefs().saveAiModelsCacheV1(_provider.id, models);
+        _cachedModels = models;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(l10n
+                  .settingsAiProviderCenterFetchModelsSuccess(models.length))),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${l10n.commonFailed}: $e')),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isFetchingModels = false;
+      });
+    }
   }
 
   Future<void> _deleteProvider() async {
@@ -215,12 +270,49 @@ class _AiProviderDetailPageState extends State<AiProviderDetailPage> {
             config.baseUrl ?? '',
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _modelController,
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              labelText: l10n.settingsAiProviderCenterModelLabel,
+          if (_cachedModels.isNotEmpty)
+            DropdownButtonFormField<String>(
+              value: _cachedModels.contains(_modelController.text.trim())
+                  ? _modelController.text.trim()
+                  : null,
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                labelText: l10n.settingsAiProviderCenterModelLabel,
+              ),
+              items: _cachedModels
+                  .map(
+                    (m) => DropdownMenuItem(
+                      value: m,
+                      child: Text(m, overflow: TextOverflow.ellipsis),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() {
+                  _modelController.text = v;
+                });
+              },
+            )
+          else
+            TextField(
+              controller: _modelController,
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                labelText: l10n.settingsAiProviderCenterModelLabel,
+              ),
             ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: _isFetchingModels ? null : _fetchModels,
+            icon: _isFetchingModels
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.download),
+            label: Text(l10n.settingsAiProviderCenterFetchModels),
           ),
           const SizedBox(height: 12),
           TextField(

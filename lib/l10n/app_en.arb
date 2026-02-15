@@ -858,5 +858,13 @@
   "aiShowAtBottom": "Show at Bottom",
   "aiShowAtRight": "Show at Right",
   "aiChatEditModelTitle": "Edit model",
-  "aiChatModelLabel": "Model"
+  "aiChatModelLabel": "Model",
+  "settingsAiProviderCenterFetchModels": "Fetch models",
+  "settingsAiProviderCenterFetchModelsEmpty": "No models returned by this provider.",
+  "settingsAiProviderCenterFetchModelsSuccess": "Fetched {count} models",
+  "@settingsAiProviderCenterFetchModelsSuccess": {
+    "placeholders": {
+      "count": {}
+    }
+  }
 }

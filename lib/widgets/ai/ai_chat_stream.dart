@@ -253,14 +253,45 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (context) {
+          final cached = Prefs().getAiModelsCacheV1(provider.id)?.models ??
+              const <String>[];
+
           return AlertDialog(
             title: Text(l10n.aiChatEditModelTitle),
-            content: TextField(
-              controller: controller,
-              decoration: InputDecoration(
-                border: const OutlineInputBorder(),
-                labelText: l10n.aiChatModelLabel,
-              ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (cached.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    value: cached.contains(controller.text.trim())
+                        ? controller.text.trim()
+                        : null,
+                    decoration: InputDecoration(
+                      border: const OutlineInputBorder(),
+                      labelText: l10n.aiChatModelLabel,
+                    ),
+                    items: cached
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(m, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(growable: false),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      controller.text = v;
+                    },
+                  )
+                else
+                  TextField(
+                    controller: controller,
+                    decoration: InputDecoration(
+                      border: const OutlineInputBorder(),
+                      labelText: l10n.aiChatModelLabel,
+                    ),
+                  ),
+              ],
             ),
             actions: [
               TextButton(

@@ -119,6 +119,11 @@ class Prefs extends ChangeNotifier {
       prefsBackupVersionKey: prefsBackupSchemaVersion,
     };
     for (final String key in prefs.getKeys()) {
+      // Skip ephemeral caches.
+      if (key.startsWith(_aiModelsCacheV1Prefix)) {
+        continue;
+      }
+
       final Object? value = prefs.get(key);
       final Map<String, Object?>? encoded = encodePrefsBackupEntry(value);
       if (encoded != null) {
@@ -131,7 +136,9 @@ class Prefs extends ChangeNotifier {
   Future<void> applyPrefsBackupMap(Map<String, dynamic> backup) async {
     for (final MapEntry<String, dynamic> entry in backup.entries) {
       final String key = entry.key;
-      if (key == prefsBackupVersionKey || _prefsImportSkipKeys.contains(key)) {
+      if (key == prefsBackupVersionKey ||
+          _prefsImportSkipKeys.contains(key) ||
+          key.startsWith(_aiModelsCacheV1Prefix)) {
         continue;
       }
       final dynamic entryValue = entry.value;
@@ -927,6 +934,67 @@ class Prefs extends ChangeNotifier {
 
   void deleteAiConfig(String identifier) {
     prefs.remove('aiConfig_$identifier');
+    // Also clear caches bound to this provider.
+    prefs.remove(_aiModelsCacheKey(identifier));
+    notifyListeners();
+  }
+
+  // --- Provider models cache (per-provider, local-only) ---
+
+  static const String _aiModelsCacheV1Prefix = 'aiModelsCacheV1_';
+
+  static String _aiModelsCacheKey(String providerId) {
+    return '$_aiModelsCacheV1Prefix$providerId';
+  }
+
+  ({int updatedAt, List<String> models})? getAiModelsCacheV1(
+      String providerId) {
+    final raw = prefs.getString(_aiModelsCacheKey(providerId));
+    if (raw == null || raw.trim().isEmpty) return null;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final updatedAt = decoded['updatedAt'] is int
+          ? decoded['updatedAt'] as int
+          : DateTime.now().millisecondsSinceEpoch;
+      final modelsRaw = decoded['models'];
+      if (modelsRaw is! List) return null;
+      final models = modelsRaw
+          .map((e) => e?.toString())
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList(growable: false)
+        ..sort();
+      return (updatedAt: updatedAt, models: models);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void saveAiModelsCacheV1(String providerId, List<String> models) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final sanitized = models
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList(growable: false)
+      ..sort();
+
+    prefs.setString(
+      _aiModelsCacheKey(providerId),
+      jsonEncode({
+        'updatedAt': now,
+        'models': sanitized,
+      }),
+    );
+    notifyListeners();
+  }
+
+  void clearAiModelsCacheV1(String providerId) {
+    prefs.remove(_aiModelsCacheKey(providerId));
     notifyListeners();
   }
 

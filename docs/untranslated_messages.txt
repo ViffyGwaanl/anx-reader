@@ -20,7 +20,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "de": [
@@ -44,7 +47,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "es": [
@@ -68,7 +74,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "fr": [
@@ -92,7 +101,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "it": [
@@ -116,7 +128,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "ja": [
@@ -140,7 +155,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "ko": [
@@ -164,7 +182,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "pt": [
@@ -188,7 +209,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "ro": [
@@ -212,7 +236,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "ru": [
@@ -236,7 +263,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "tr": [
@@ -260,7 +290,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "zh": [
@@ -284,7 +317,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "zh_LZH": [
@@ -308,7 +344,10 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ],
 
   "zh_TW": [
@@ -332,6 +371,9 @@
     "settingsAiProviderCenterDeleteTitle",
     "settingsAiProviderCenterDeleteBody",
     "aiChatEditModelTitle",
-    "aiChatModelLabel"
+    "aiChatModelLabel",
+    "settingsAiProviderCenterFetchModels",
+    "settingsAiProviderCenterFetchModelsEmpty",
+    "settingsAiProviderCenterFetchModelsSuccess"
   ]
 }

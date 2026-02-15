@@ -858,5 +858,13 @@
   "aiShowAtBottom": "在底部显示",
   "aiShowAtRight": "在右侧显示",
   "aiChatEditModelTitle": "编辑模型",
-  "aiChatModelLabel": "模型"
+  "aiChatModelLabel": "模型",
+  "settingsAiProviderCenterFetchModels": "获取模型列表",
+  "settingsAiProviderCenterFetchModelsEmpty": "该供应商未返回模型列表。",
+  "settingsAiProviderCenterFetchModelsSuccess": "已获取 {count} 个模型",
+  "@settingsAiProviderCenterFetchModelsSuccess": {
+    "placeholders": {
+      "count": {}
+    }
+  }
 }
