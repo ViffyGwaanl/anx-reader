@@ -107,7 +107,7 @@ class CancelableLangchainRunner {
       final toolSpecs = tools.cast<ToolSpec>().toList(growable: false);
       final steps = <AgentStep>[];
       final timeline = <_ReasoningItem>[];
-      // String? pendingThought;
+      var thinkingSummary = '';
       var iterations = 0;
 
       void emit() {
@@ -115,6 +115,7 @@ class CancelableLangchainRunner {
         controller.add(
           _composeAgentPayload(
             timeline: timeline,
+            thinkingSummary: thinkingSummary,
           ),
         );
       }
@@ -126,6 +127,11 @@ class CancelableLangchainRunner {
         } else {
           timeline.add(_ReasoningItem.reply(text));
         }
+      }
+
+      void appendThinkingChunk(String text) {
+        if (text.isEmpty) return;
+        thinkingSummary += text;
       }
 
       List<ChatMessage> buildScratchpad() {
@@ -176,6 +182,7 @@ class CancelableLangchainRunner {
           final completer = Completer<void>();
           _subscription = model.stream(prompt, options: options).listen(
             (chunk) {
+              final isThinkChunk = chunk.output.content.startsWith(thinkTag);
               final normalizedChunk = _normalizeThinkChunk(chunk);
 
               aggregated = aggregated == null
@@ -185,7 +192,11 @@ class CancelableLangchainRunner {
 
               if (output.toolCalls.isEmpty) {
                 final textChunk = normalizedChunk.outputAsString;
-                appendReplyChunk(textChunk);
+                if (isThinkChunk) {
+                  appendThinkingChunk(textChunk);
+                } else {
+                  appendReplyChunk(textChunk);
+                }
                 emit();
               }
             },
@@ -333,8 +344,17 @@ class CancelableLangchainRunner {
 
   String _composeAgentPayload({
     required List<_ReasoningItem> timeline,
+    String? thinkingSummary,
   }) {
     final buffer = StringBuffer();
+
+    final summary = thinkingSummary?.trim();
+    if (summary != null && summary.isNotEmpty) {
+      buffer.write('<think>');
+      buffer.write(summary);
+      buffer.write('</think>');
+    }
+
     for (final item in timeline) {
       final tag = item.toTag();
       if (tag.isNotEmpty) {

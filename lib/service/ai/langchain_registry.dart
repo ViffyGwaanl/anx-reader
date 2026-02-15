@@ -10,6 +10,8 @@ import 'package:langchain_core/tools.dart';
 import 'package:langchain_google/langchain_google.dart';
 import 'package:langchain_openai/langchain_openai.dart';
 
+import 'gemini_chat_with_thinking.dart';
+
 import 'langchain_ai_config.dart';
 
 /// Factory responsible for building chat models based on user preferences.
@@ -65,11 +67,13 @@ class LangchainAiRegistry {
   }
 
   BaseChatModel _buildGoogle(LangchainAiConfig config) {
-    return ChatGoogleGenerativeAI(
+    return ChatGoogleGenerativeAIWithThinking(
       apiKey: config.apiKey.isEmpty ? null : config.apiKey,
       baseUrl: config.baseUrl,
       headers: config.headers.isEmpty ? null : config.headers,
       defaultOptions: config.toGoogleOptions(),
+      thinkingMode: config.thinkingMode,
+      includeThoughts: config.includeThoughts,
     );
   }
 
