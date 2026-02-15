@@ -875,5 +875,7 @@
   "aiThinkingMinimal": "Minimal",
   "aiThinkingLow": "Low",
   "aiThinkingMedium": "Medium",
-  "aiThinkingHigh": "High"
+  "aiThinkingHigh": "High",
+  "aiSectionThinking": "Thinking",
+  "aiSectionTools": "Tools"
 }

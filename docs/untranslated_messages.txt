@@ -32,7 +32,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "de": [
@@ -68,7 +70,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "es": [
@@ -104,7 +108,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "fr": [
@@ -140,7 +146,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "it": [
@@ -176,7 +184,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "ja": [
@@ -212,7 +222,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "ko": [
@@ -248,7 +260,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "pt": [
@@ -284,7 +298,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "ro": [
@@ -320,7 +336,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "ru": [
@@ -356,7 +374,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "tr": [
@@ -392,7 +412,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "zh": [
@@ -428,7 +450,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "zh_LZH": [
@@ -464,7 +488,9 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ],
 
   "zh_TW": [
@@ -500,6 +526,8 @@
     "aiThinkingMinimal",
     "aiThinkingLow",
     "aiThinkingMedium",
-    "aiThinkingHigh"
+    "aiThinkingHigh",
+    "aiSectionThinking",
+    "aiSectionTools"
   ]
 }

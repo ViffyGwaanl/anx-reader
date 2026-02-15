@@ -1166,7 +1166,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                 children: [
                   isUser
                       ? _buildCollapsibleText(content, isLongMessage)
-                      : _buildAssistantTimeline(parsed, isStreaming),
+                      : _buildAssistantSections(content, isStreaming),
                   if (!isUser)
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
@@ -1240,42 +1240,99 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     return copyText;
   }
 
-  Widget _buildAssistantTimeline(ParsedReasoning parsed, bool isStreaming) {
-    if (parsed.timeline.isEmpty) {
-      return isStreaming
-          ? Skeletonizer.zone(child: Bone.multiText())
-          : const SizedBox.shrink();
+  Widget _buildAssistantSections(String content, bool isStreaming) {
+    // Extract the <think>...</think> summary (if any), then parse the rest for
+    // answer text + tool steps.
+    final thinkRegex = RegExp(r'<think>([\s\S]*?)<\/think>');
+    final matches = thinkRegex.allMatches(content).toList(growable: false);
+
+    final thinking = matches
+        .map((m) => m.group(1))
+        .whereType<String>()
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .join('\n')
+        .trim();
+
+    final remaining = content.replaceAll(thinkRegex, '').trim();
+    final parsed = parseReasoningContent(remaining);
+
+    final answerText = parsed.timeline
+        .where((e) => e.type == ParsedReasoningEntryType.reply)
+        .map((e) => e.text ?? '')
+        .join('')
+        .trim();
+
+    final toolSteps = parsed.toolSteps;
+
+    final l10n = L10n.of(context);
+
+    final children = <Widget>[];
+
+    if (answerText.isEmpty) {
+      children.add(
+        isStreaming
+            ? Skeletonizer.zone(child: Bone.multiText())
+            : const SizedBox.shrink(),
+      );
+    } else {
+      children.add(
+        StyledMarkdown(
+          data: answerText,
+          selectable: true,
+        ),
+      );
     }
 
-    final widgets = <Widget>[];
-    for (var i = 0; i < parsed.timeline.length; i++) {
-      final entry = parsed.timeline[i];
-      switch (entry.type) {
-        case ParsedReasoningEntryType.reply:
-          if (entry.text != null && entry.text!.trim().isNotEmpty) {
-            widgets.add(
+    if (thinking.isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(top: 6),
+            title: Text(
+              l10n.aiSectionThinking,
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            children: [
               StyledMarkdown(
-                data: entry.text!,
+                data: thinking,
                 selectable: true,
               ),
-            );
-          }
-          break;
-        case ParsedReasoningEntryType.tool:
-          if (entry.toolStep != null) {
-            widgets.add(_buildToolTile(entry.toolStep!));
-          }
-          break;
-      }
+            ],
+          ),
+        ),
+      );
+    }
 
-      if (i != parsed.timeline.length - 1) {
-        widgets.add(const SizedBox(height: 8));
-      }
+    if (toolSteps.isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(top: 6),
+            title: Text(
+              l10n.aiSectionTools,
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            children: [
+              for (var i = 0; i < toolSteps.length; i++) ...[
+                _buildToolTile(toolSteps[i]),
+                if (i != toolSteps.length - 1) const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+      );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: widgets,
+      children: children,
     );
   }
 

@@ -875,5 +875,7 @@
   "aiThinkingMinimal": "极低",
   "aiThinkingLow": "低",
   "aiThinkingMedium": "中",
-  "aiThinkingHigh": "高"
+  "aiThinkingHigh": "高",
+  "aiSectionThinking": "思考",
+  "aiSectionTools": "工具"
 }
