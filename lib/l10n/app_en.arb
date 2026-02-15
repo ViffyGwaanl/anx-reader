@@ -815,7 +815,7 @@
   "useBookStyles": "Use Book Styles",
   "useBookStylesDescription": "When enabled, the app will use the styling defined in the book instead of your custom settings for line height, font weight, text indent, letter spacing, and paragraph spacing",
   "historyBack": "Back",
-  "historyForward": "Forward", 
+  "historyForward": "Forward",
   "historyClose": "Close",
   "settingsAiUserPrompts": "User Prompts",
   "settingsAiUserPromptsAdd": "Add Prompt",
@@ -856,5 +856,7 @@
     }
   },
   "aiShowAtBottom": "Show at Bottom",
-  "aiShowAtRight": "Show at Right"
+  "aiShowAtRight": "Show at Right",
+  "aiChatEditModelTitle": "Edit model",
+  "aiChatModelLabel": "Model"
 }

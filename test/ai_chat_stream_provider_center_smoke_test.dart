@@ -68,5 +68,15 @@ void main() {
 
     expect(find.textContaining('My Gateway'), findsOneWidget);
     expect(find.textContaining('my-model'), findsOneWidget);
+
+    // Edit model via in-chat dialog.
+    await tester.tap(find.byIcon(Icons.tune));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).first, 'new-model');
+    await tester.tap(find.text('保存'));
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.textContaining('new-model'), findsOneWidget);
   });
 }

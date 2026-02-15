@@ -18,7 +18,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "de": [
@@ -40,7 +42,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "es": [
@@ -62,7 +66,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "fr": [
@@ -84,7 +90,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "it": [
@@ -106,7 +114,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "ja": [
@@ -128,7 +138,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "ko": [
@@ -150,7 +162,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "pt": [
@@ -172,7 +186,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "ro": [
@@ -194,7 +210,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "ru": [
@@ -216,7 +234,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "tr": [
@@ -238,7 +258,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "zh": [
@@ -260,7 +282,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "zh_LZH": [
@@ -282,7 +306,9 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ],
 
   "zh_TW": [
@@ -304,6 +330,8 @@
     "settingsAiProviderCenterApiKeyLabel",
     "settingsAiProviderCenterSetAsDefault",
     "settingsAiProviderCenterDeleteTitle",
-    "settingsAiProviderCenterDeleteBody"
+    "settingsAiProviderCenterDeleteBody",
+    "aiChatEditModelTitle",
+    "aiChatModelLabel"
   ]
 }

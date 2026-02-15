@@ -238,6 +238,61 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     });
   }
 
+  Future<void> _editCurrentModel() async {
+    if (_isStreaming) return;
+
+    final l10n = L10n.of(context);
+    final provider = _currentProvider;
+
+    final existing = Prefs().getAiConfig(provider.id);
+    final controller = TextEditingController(
+      text: (existing['model'] ?? '').trim(),
+    );
+
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(l10n.aiChatEditModelTitle),
+            content: TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                border: const OutlineInputBorder(),
+                labelText: l10n.aiChatModelLabel,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.commonSave),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (ok != true || !mounted) return;
+
+      final nextModel = controller.text.trim();
+      final next = Map<String, String>.from(existing);
+      if (nextModel.isEmpty) {
+        next.remove('model');
+      } else {
+        next['model'] = nextModel;
+      }
+
+      Prefs().saveAiConfig(provider.id, next);
+      setState(() {});
+    } finally {
+      controller.dispose();
+    }
+  }
+
   List<String> _pickSuggestedPrompts() {
     final prompts = List<String>.from(_starterPrompts)..shuffle();
     return prompts.take(3).toList(growable: false);
@@ -694,6 +749,12 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                   child: Row(
                     children: [
                       Flexible(child: aiService),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        icon: const Icon(Icons.tune, size: 18),
+                        tooltip: L10n.of(context).aiChatEditModelTitle,
+                        onPressed: _editCurrentModel,
+                      ),
                     ],
                   ),
                 ),
