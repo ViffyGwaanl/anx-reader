@@ -1,165 +1,226 @@
-# PR-10 计划：AI 翻译体验重做（参考 epub-translator）
+# PR-10 计划：EPUB AI 翻译（内联显示 + 导出翻译版 EPUB）（参考 epub-translator）
 
-> 目标：把 Anx Reader 的“选中翻译”和“全文（内联）翻译”拆成两个清晰的产品形态：
-> - **选中翻译**：保留“翻译 + 讲解/词汇/注释”的学习型体验（当前 `AiPrompts.translate` 更适合这里）。
-> - **全文翻译（EPUB 内联）**：输出必须是 **纯译文**，禁止出现解释/标题/词典结构，否则会污染正文排版。
+> 范围：**只做 EPUB**（不做 PDF）。
+>
+> 目标：把 Anx Reader 的“选中翻译”和“全文翻译”拆成两个明确的产品与工程路径：
+> - **选中翻译（划线翻译 / Translation & Reference）**：保持现状，继续使用原来的 AI prompt（`AiPrompts.translate`），输出可包含讲解/词汇/注释。
+> - **全文翻译（EPUB 内联）**：输出必须是 **纯译文**，禁止出现解释/标题/词典结构/Markdown 列表，否则会污染正文。
+> - **导出翻译版 EPUB**：把整本书翻译后导出为新的 EPUB，支持两种“提交模式”（对齐 epub-translator）：
+>   - `SubmitKind.REPLACE`：导出“仅译文”版（替换原文）
+>   - `SubmitKind.APPEND_BLOCK`：导出“双语”版（原文 + 块级译文）
 >
 > 参考项目：`oomol-lab/epub-translator`（MIT）
-> - 核心思路：**翻译任务与结构填充/呈现解耦**、控制并发（concurrency）、限制每组输入规模（max_group_tokens）、缓存进度（cache_path）、并提供 REPLACE/APPEND 等提交模式。
+> - 借鉴点（不复用代码）：
+>   - 提交模式（REPLACE / APPEND_BLOCK）
+>   - 限制每组规模（max_group_tokens）
+>   - 并发控制（concurrency）
+>   - 缓存/断点恢复（cache_path）
+>   - 翻译提示词可自定义（user_prompt）
+>   - 允许为“翻译任务”指定专用模型/配置
 
 ---
 
-## 0. 背景：现状与问题
+## 0. 背景：现状与关键改动点
 
 ### 0.1 现有实现路径（Anx Reader）
-- EPUB 全文翻译由 `foliate-js` 实现：`assets/foliate-js/src/translator.js`
-  - JS 通过 `window.flutter_inappwebview.callHandler('translateText', text)` 调 Flutter
-- Flutter 侧 handler：`lib/page/book_player/epub_player.dart`（`translateText` handler）
-  - 调用：`Prefs().fullTextTranslateService.provider.translateTextOnly(...)`
+- EPUB 全文翻译（内联显示）由 `foliate-js` 实现：`assets/foliate-js/src/translator.js`
+  - JS 调用 Flutter：`window.flutter_inappwebview.callHandler('translateText', text)`
+- Flutter handler：`lib/page/book_player/epub_player.dart`（`translateText` handler）
+  - 调用：`Prefs().fullTextTranslateService.provider.translateTextOnly(text, from, to)`
 - AI 翻译 provider：`lib/service/translate/ai.dart`
   - 使用 prompt：`AiPrompts.translate`
 
-### 0.2 现存问题
-1) **全文翻译输出“像讲解”**
-- 当前 `AiPrompts.translate` 设计为“Translation & Reference（翻译 + 讲解 + glossary + encyclopedia）”。
-- 在 EPUB 内联翻译里会把分析块插入正文 → 观感非常差。
-
-2) **请求过长 & 失败率高**
-- 章节/段落较长时，AI provider 更容易 timeout 或触发网关限制。
-
-3) **并发与限流风险**
-- IntersectionObserver 会触发很多元素翻译；如果没有并发控制，会产生爆发式请求，易 429。
-
----
-
-## 1. 目标（PR-10 DoD）
-
-### 必须达成（P0）
-- EPUB 全文翻译（内联）在 AI 模式下：**只输出译文**（不出现“解释/词汇表/标题/编号/markdown”）。
-- 选中翻译（划线翻译）保持现有“学习型翻译”体验。
-- 对长文本有可控的 chunking 策略（防超时/失败）。
-- 有并发控制（避免快速翻页/滚动导致 API 风暴）。
-
-### 期望达成（P1）
-- 基于输入文本的缓存（减少重复请求；scroll/回到上一页时更稳）。
-- 失败重试与降级：失败时不污染正文（例如返回空串/简短错误），并可在日志中定位。
+### 0.2 你提出的增强需求（本 PR 的“约束”）
+1) 选中翻译继续用原来的（学习型输出不变）。
+2) 全文翻译：要支持“仅显示翻译”和“双语显示”。
+   - 这件事 **已经在 foliate-js 里通过 TranslationMode 支持**（`TRANSLATION_ONLY` / `BILINGUAL`），我们要保证全文翻译返回的字符串是“干净译文”。
+3) 提交模式（导出时）：`SubmitKind.REPLACE` / `SubmitKind.APPEND_BLOCK` **可选**。
+4) 翻译结果要 **可缓存且可复用**（至少跨 session 的持久缓存）。
+5) 做完“全量翻译”后可 **导出** 成翻译好的 EPUB。
+6) 翻译提示词要可自定义。
+7) 模型要能单独指定“翻译专用模型”（不影响聊天默认模型）。
 
 ---
 
-## 2. 参考 epub-translator 的可迁移设计点
+## 1. Definition of Done（验收标准）
 
-（不复用代码，只借鉴工程结构）
+### 1.1 全文内联翻译（EPUB 阅读器）
+- 当 Full-text Translation Service 选择 AI 时：
+  - 输出严格为“纯译文”，不包含解释/词汇表/标题/编号/Markdown。
+  - 保留换行（段落结构）尽量接近原文。
+- 有并发控制（防止快速滚动导致 API 风暴）。
+- 有持久缓存：同样的文本块再次出现时不会再次请求。
 
-1) **提交模式（SubmitKind）**
-- epub-translator 有 REPLACE / APPEND_TEXT / APPEND_BLOCK。
-- Anx Reader `translator.js` 已有类似的显示模式：
-  - OFF / ORIGINAL_ONLY / TRANSLATION_ONLY / BILINGUAL
-- 对应策略：全文翻译场景使用“append block”（译文单独成块）最清晰；但要求译文本身必须干净。
+### 1.2 导出翻译版 EPUB
+- 支持两种导出：
+  - REPLACE：导出仅译文版本
+  - APPEND_BLOCK：导出双语版本（原文 + 译文 block）
+- 导出过程可展示进度，可取消，失败可恢复/重试（最小可行：失败提示 + 下次重来；增强：断点恢复）。
 
-2) **限制每次处理规模（max_group_tokens）**
-- 我们用 `maxChunkChars` 近似（不引入 token 计数器），并按段落/句子切分。
-
-3) **并发控制（concurrency）**
-- epub-translator 显式控制并发。
-- 我们需要在 Flutter handler 层做队列/信号量，保证同一时刻最多 N 个 translateTextOnly 在跑。
-
-4) **缓存（cache_path）与恢复**
-- epub-translator 用 cache 保障中断可恢复。
-- 我们至少做：
-  - 内存 LRU（本章/本页有效）
-  - 可选：磁盘 cache（按书 id + 语言对 + hash，后续再做）
+### 1.3 配置能力
+- 有一个明确的位置配置“翻译专用 AI provider + model”。
+- 翻译提示词可编辑（至少 fulltext prompt 可编辑；可选：加一个 user_prompt 追加指令）。
+- 缓存可开关、可清理。
 
 ---
 
-## 3. 方案选型（建议）
+## 2. 设计总览（架构）
 
-### 方案 A：一个 AI TranslateService + 通过“调用方”决定 prompt
-- 问题：`TranslateServiceProvider.translateTextOnly(...)` 的签名无法识别调用方（选中翻译 vs 全文翻译）。
-- 不建议：会引入隐式依赖（靠全局 Prefs/状态推断），长期可维护性差。
+我们拆成两条 pipeline：
 
-### 方案 B（推荐）：增加一个新的 TranslateService：AI（全文纯翻译）
-- 新增 `TranslateService.aiFullText`（或 `aiTranslateOnly`）
-  - provider 使用新 prompt `translate_fulltext`（严格纯译文）
-- 原 `TranslateService.ai` 保持“翻译+讲解”给选中翻译使用。
+### 2.1 Pipeline A：选中翻译（保持现状）
+- 继续走 `TranslateService.ai` → `AiTranslateProvider` → `AiPrompts.translate`
+- 不引入新模式，避免破坏现有体验。
 
-**优点**：调用链明确、配置可分离、回归风险更小。
+### 2.2 Pipeline B：全文翻译（内联显示 + 导出）
+新增一个专门的“全文纯翻译”服务：
+- 新 `TranslateService.aiFullText`（名称建议：**AI (Translate Only)**）
+- Provider：`AiFullTextTranslateProvider`
+  - prompt：`AiPrompts.translate_fulltext`（或类似新枚举）
+  - 支持：chunking + 并发 + 缓存 +（导出时）整书遍历
 
----
-
-## 4. PR-10 详细实施计划（按提交拆解）
-
-### PR-10.1：Prompt 拆分 + 路由
-- 新增 `AiPrompts.translate_fulltext`（仅全文翻译使用）
-  - 默认 prompt 要求：只输出译文；保留换行；禁止解释；禁止 markdown 列表/标题。
-- 新增 prompt 生成函数：`generatePromptTranslateFullText(...)`
-- 新增 provider：`AiFullTextTranslateProvider`
-- 新增 TranslateService：`aiFullText`（或命名更直观）
-- Settings：
-  - AI Settings 页面新增“全文翻译 prompt”编辑入口
-  - 翻译设置页：FullTextTranslateServicePicker 里可选 `AI (translate only)`
-
-### PR-10.2：Chunking（长度上限）
-- 在 `AiFullTextTranslateProvider.translateTextOnly(...)` 内实现：
-  - `maxChunkChars`（默认 800~1500，可配置为常量；后续可做成配置项）
-  - 分割优先级：空行段落 > 单行换行 > 句号/问号/感叹号边界 > 兜底硬切
-  - 拼接时保留原有换行结构（至少段落间保留 `\n`）
-
-### PR-10.3：并发控制（concurrency）
-- 在 `EpubPlayer` 的 `translateText` handler 层增加一个 per-webview 的队列/信号量：
-  - 同时最多 N（建议默认 2）个翻译请求
-  - 同一文本重复请求去重（inflight map）
-- 目的：避免 IntersectionObserver 触发大量并发导致 429。
-
-### PR-10.4：缓存与可观测性
-- 内存缓存：LRU（例如 500 条）
-  - key = hash(text + from + to + serviceId + model)
-  - value = translation
-- 与现有“AI 调试日志开关”对齐：
-  - 开启后记录 chunking/队列耗时/429 重试次数
-
-### PR-10.5：测试与验收
-- 单元测试：
-  - chunker 的分割与拼接（长度控制 + 换行保留）
-  - provider 确认不会输出多余结构（至少通过 prompt 的 contract + golden snippet）
-- 真机验收脚本（iPad）：
-  1) FullTextTranslateService 选 `AI (translate only)`
-  2) Reader 翻译模式切到 BILINGUAL
-  3) 快速滚动/翻页 1-2 分钟，确认不卡顿、无明显 429、译文不夹带解释
+**核心原则：同一个翻译引擎，两个入口：**
+- 在线内联：单块 translateText handler 调用
+- 离线导出：遍历整本 EPUB 内容文档，批量调用
 
 ---
 
-## 5. 接口与改动点清单（工程影响评估）
+## 3. 数据模型与存储
 
-### 必改文件（预计）
-- `lib/service/translate/index.dart`
-  - `TranslateService` enum 增加 `aiFullText`
-- `lib/service/translate/ai.dart`
-  - 保持为选中翻译（学习型）
-- 新增 `lib/service/translate/ai_fulltext.dart`
-  - 纯翻译 provider + chunking +（可选）缓存
-- `lib/enums/ai_prompts.dart` + `lib/service/ai/prompt_generate.dart`
-  - 新增 `translate_fulltext` prompt + generator
-- `assets/foliate-js/src/translator.js`
-  - 尽量不改（当前 append block 逻辑 OK），只在必要时改错误处理
+### 3.1 配置（Prefs）
+建议新增一组“翻译专用”配置（避免污染聊天的 provider 配置）：
+- `aiFullTextTranslateProviderId`：从 Provider Center 选择一个启用的 provider（不在 provider list 的则回退 openai）
+- `aiFullTextTranslateModelOverride`：翻译专用 model（可选；为空则用 provider config 的 model）
+- `aiFullTextTranslateUserPrompt`：用户自定义翻译指令（可选，作为 prompt 末尾的附加规则）
+- `aiFullTextTranslateCacheEnabled`：是否启用缓存
+- `aiFullTextTranslateConcurrency`：并发数（默认 2）
+- `aiFullTextTranslateMaxChunkChars`：chunking 上限（默认 1200，按实际调）
+- `aiFullTextExportSubmitKind`：导出默认模式（REPLACE/APPEND_BLOCK）
 
-### 风险点
-- 引入新 TranslateService 可能影响设置页展示与旧配置迁移
-  - 处理方式：旧用户不受影响；只有当用户把 FullTextTranslateService 改为 AI FullText 才启用。
-- AI provider 的输出仍可能“跑偏”
-  - 处理方式：prompt 强约束 + chunking + 失败时返回空/短错误而不是长解释
+> 备注：这些配置属于“AI 设置”，但更贴近“翻译设置页”，建议放在 TranslateSetting 的 service config 表单里。
+
+### 3.2 缓存（持久）
+参考 epub-translator 的 cache_path 思路，但在移动端我们做轻量实现：
+- 存储位置：`getAnxCacheDir()` 下单独的 cache 文件或 sqlite 表。
+- key 设计（必须能稳定复用）：
+  - `hash(providerId + model + fromLang + toLang + promptVersion + normalizedText)`
+- value：`translatedText` + `timestamp` + `hitCount`（可选）
+
+清理策略：
+- 最大条目数 or 最大文件大小（例如 2万条 / 50MB）
+- LRU 淘汰（按 lastUsed）
+
+> 关键：缓存 **不参与 WebDAV sync / backup**（避免体积与隐私问题），仅本机。
 
 ---
 
-## 6. 里程碑与交付物
+## 4. EPUB 导出翻译版：算法与实现策略
 
-- 交付物 1：PR-10（代码 + docs）
-- 交付物 2：真机验收 checklist（附带“开启 AI 调试日志”定位方法）
+### 4.1 输入与输出
+- 输入：书库中某本 EPUB 的原始文件路径
+- 输出：一个新 EPUB 文件（用户通过 Files 选择保存位置）
+
+### 4.2 解析与修改
+- 使用 `archive` 解压 epub（zip）到临时目录
+- 遍历 `content.opf` 找到 spine 中的 XHTML 文档（或直接遍历 OEBPS/*.xhtml）
+- 对每个文档：
+  - 解析 DOM
+  - 找到“可翻译块”列表（近似复用 translator.js 的 walkTextNodes 策略：跳过 pre/code/math/style/script，跳过已翻译节点）
+  - 对每个块：
+    - 用 chunker 控制长度
+    - 查缓存 → 没命中才请求
+
+### 4.3 SubmitKind 的落地语义
+- **APPEND_BLOCK**（推荐）：
+  - 在原块后插入一个块级译文节点（如 `<p class="anx-translated">...</p>` 或 `<span class="translated-text" style="display:block">...</span>`）
+  - 译文节点打标 `data-translation-mark="1"`，方便后续识别/再处理。
+
+- **REPLACE**（单语版）：
+  - 将块的文本内容替换为译文
+  - 风险：如果块内存在复杂 inline markup（em/strong/a/span），替换可能损伤格式。
+  - 策略：
+    1) 第一版：对“无子元素”或“简单结构”的节点执行 replace；复杂结构 fallback 为 append（并在导出日志里记录）。
+    2) 后续增强：做更精细的 text node 替换（工程量更大）。
+
+### 4.4 并发与进度
+- 采用任务队列：最多 `concurrency` 个并发请求
+- 进度 = 已完成块数 / 总块数（按文档累计）
+- 可取消：取消时停止队列，写入一个 job state（可选）
+
+### 4.5 断点恢复（可选 P1）
+- 把每个块的翻译结果写入缓存后即可恢复：
+  - 下次导出时命中缓存 → 继续
+- 额外保存 job manifest（当前处理到哪个文档/块索引）可更快恢复
 
 ---
 
-## 7. 开工前需要你确认的 2 个选择
-1) **新 TranslateService 的名字**：
-   - 选项：`AI (Full Text)` / `AI (Translate Only)` / `AI Inline`
-2) **并发默认值 N**：
-   - 建议：2（更稳）
-   - 你如果更追求速度：4（可能更易触发限流）
+## 5. UI/UX 设计
+
+### 5.1 翻译设置页（TranslateSetting）
+在“FullTextTranslationConfig”里，当选择 `AI (Translate Only)` 时额外显示：
+- 翻译专用 Provider（来自 Provider Center 的启用 providers，下拉选择）
+- 翻译专用 Model（输入框/下拉，复用 models cache）
+- 自定义翻译指令（可选，多行文本）
+- SubmitKind（导出默认模式：REPLACE / APPEND_BLOCK）
+- 缓存开关 + 清理按钮
+- 并发数、maxChunkChars
+
+### 5.2 导出入口
+建议两个入口（二选一，或都做）：
+1) Book detail / more menu：`导出翻译版 EPUB...`
+2) 阅读页菜单：`翻译 -> 导出翻译版 EPUB...`
+
+导出页（wizard）：
+- 选择模式：REPLACE / APPEND_BLOCK
+- 选择目标语言（使用 fullTextTranslateTo）
+- 展示进度条 + 取消
+- 完成后弹出“保存到 Files/分享”
+
+---
+
+## 6. 工程拆分（PR stack）
+
+### PR-10.1：全文翻译专用服务（内联）
+- 新增 `TranslateService.aiFullText` + `AiFullTextTranslateProvider`
+- 新增 `AiPrompts.translate_fulltext`
+- 支持翻译专用 providerId + model override + user_prompt
+- **保证返回纯译文**
+
+### PR-10.2：chunking + 并发控制 + 持久缓存
+- chunker：段落/句子边界优先
+- 队列：concurrency 默认 2
+- TranslationCache：文件/表 + LRU 清理
+
+### PR-10.3：导出翻译版 EPUB（APPEND_BLOCK）
+- 实现解压、遍历、插入译文 block、重新打包
+- UI：导出页 + 保存
+
+### PR-10.4：导出 REPLACE（最小可行版）
+- 对简单节点 replace；复杂节点 fallback append 并记录
+
+### PR-10.5：测试与回归
+- 单测：chunker、cache key、submit kind 插入
+- 真机脚本：iPad 长时间滚动、整书导出
+
+---
+
+## 7. 测试计划（最小闭环）
+
+### 7.1 内联显示
+- 选择全文翻译服务为 `AI (Translate Only)`
+- 阅读器切到：TRANSLATION_ONLY / BILINGUAL
+- 快速滚动/翻页：
+  - 不出现“解释型输出”
+  - 不出现明显 429 风暴（必要时启用 AI 调试日志）
+
+### 7.2 导出
+- 同一本 EPUB：
+  - 导出 APPEND_BLOCK：译文在原文后，结构不崩
+  - 导出 REPLACE：正文变为译文（允许少量格式损伤但不应破坏可读性）
+
+---
+
+## 8. 开工前需要你确认的几个默认值
+1) `AI (Translate Only)` 的默认并发：建议 2
+2) `maxChunkChars`：建议 1200（可在真机调）
+3) REPLACE 的“复杂结构 fallback append”策略：是否接受（第一版建议接受，后续再精细化）
