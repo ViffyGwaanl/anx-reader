@@ -93,8 +93,8 @@
 - `aiFullTextTranslateModelOverride`：翻译专用 model（可选；为空则用 provider config 的 model）
 - `aiFullTextTranslateUserPrompt`：用户自定义翻译指令（可选，作为 prompt 末尾的附加规则）
 - `aiFullTextTranslateCacheEnabled`：是否启用缓存
-- `aiFullTextTranslateConcurrency`：并发数（默认 2）
-- `aiFullTextTranslateMaxChunkChars`：chunking 上限（默认 1200，按实际调）
+- `aiFullTextTranslateConcurrency`：并发数（默认 **4**，你已确认）
+- `aiFullTextTranslateMaxChunkChars`：chunking 上限（默认 1200；实际实现以“段落/句子边界优先”的 chunker 为准，不允许硬切破坏语义）
 - `aiFullTextExportSubmitKind`：导出默认模式（REPLACE/APPEND_BLOCK）
 
 > 备注：这些配置属于“AI 设置”，但更贴近“翻译设置页”，建议放在 TranslateSetting 的 service config 表单里。
@@ -114,7 +114,36 @@
 
 ---
 
-## 4. EPUB 导出翻译版：算法与实现策略
+## 4. Chunking/分段策略（为何必须“按段落/句子”而不是硬切）
+
+你提到的点非常关键：**硬切会显著降低翻译准确性**（主谓宾断裂、指代丢失、上下文丢失）。
+
+### 4.1 epub-translator 是怎么做的（可借鉴）
+`epub-translator` 并不是“按句子 split”，它走的是更强的 **结构化切分 + token 预算分组**：
+- 先把 XHTML/XML 解析成一系列 `TextSegment`（按 DOM 文本节点与 tail 分割）
+- 再把它们组装成 `InlineSegment`（保持 inline tag 结构与相对顺序）
+- 用 `tiktoken` 计算每个 segment 的 token/score，再用 `resource_segmentation.split(...)` 按 `max_group_score` 分组
+- 组内渲染 source text 时，会用 `\n\n` 作为段落分隔（见 `XMLTranslator._render_source_text_parts`）
+
+这套做法的本质是：**优先按“DOM 的自然段落/块级结构”切分**，只有在 token 预算不够时，才会在结构边界上进一步裁剪（而不是随便截断字符）。
+
+### 4.2 Anx Reader 里我们怎么落地（移动端可实现版本）
+我们在 Anx Reader 分两种场景处理：
+
+A) 阅读器内联翻译（translator.js 单块请求）
+- 默认以“段落/块级元素”为单位翻译（这是最接近语义的边界）
+- 只有当块文本超出阈值时，才启动句子级 split（`。！？.!?` + 换行）
+- 绝不做“任意字符硬切”
+
+B) 导出翻译 EPUB（批量）
+- 我们直接在 XHTML DOM 层面做分段：
+  - 以 block-level element 为主（p/div/li/h1..h6/blockquote 等）
+  - 对超长 block 采用句子边界 split
+- 同时引入“token/长度预算”的分组思想（Dart 侧先用字符近似，后续可选接入 token 计数器）
+
+---
+
+## 5. EPUB 导出翻译版：算法与实现策略
 
 ### 4.1 输入与输出
 - 输入：书库中某本 EPUB 的原始文件路径
@@ -220,7 +249,11 @@
 
 ---
 
-## 8. 开工前需要你确认的几个默认值
-1) `AI (Translate Only)` 的默认并发：建议 2
-2) `maxChunkChars`：建议 1200（可在真机调）
-3) REPLACE 的“复杂结构 fallback append”策略：是否接受（第一版建议接受，后续再精细化）
+## 8. 已确认的默认值 & 仍待确认项
+
+### 8.1 已确认
+- 并发默认值：**4**
+
+### 8.2 仍待确认（我建议的默认）
+1) `maxChunkChars`：建议 1200（实际按“段落/句子边界优先”的 chunker 切；不是硬切）
+2) REPLACE 的“复杂结构 fallback append”第一版策略：是否接受（我建议接受，先把功能可靠跑通）
