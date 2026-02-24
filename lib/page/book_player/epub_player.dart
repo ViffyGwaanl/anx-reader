@@ -5,6 +5,7 @@ import 'dart:ui';
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/dao/book.dart';
 import 'package:anx_reader/dao/book_note.dart';
+import 'package:anx_reader/enums/inline_fulltext_translate_failure_reason.dart';
 import 'package:anx_reader/enums/page_turn_mode.dart';
 import 'package:anx_reader/enums/reading_info.dart';
 import 'package:anx_reader/enums/translation_mode.dart';
@@ -28,6 +29,9 @@ import 'package:anx_reader/providers/bookmark.dart';
 import 'package:anx_reader/providers/chapter_content_bridge.dart';
 import 'package:anx_reader/providers/current_reading.dart';
 import 'package:anx_reader/service/book_player/book_player_server.dart';
+import 'package:anx_reader/service/translate/fulltext_translate_runtime.dart';
+import 'package:anx_reader/service/translate/index.dart';
+import 'package:anx_reader/service/translate/inline_fulltext_translation_status.dart';
 import 'package:anx_reader/providers/toc_search.dart';
 import 'package:anx_reader/service/tts/models/tts_sentence.dart';
 import 'package:anx_reader/utils/coordinates_to_part.dart';
@@ -102,6 +106,13 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
   bool _selectionClearLocked = false;
   bool _selectionClearPending = false;
 
+  // Inline translation HUD (per relocated page)
+  final ValueNotifier<_InlineTranslateHudState> _translateHud =
+      ValueNotifier(const _InlineTranslateHudState());
+  final Map<String, _InlineTranslateHudEntry> _translateHudItems =
+      <String, _InlineTranslateHudEntry>{};
+  bool _translateHudVisible = true;
+
   // to know anytime if we are on top of navigation stack
   bool get _isTopOfNavigationStack =>
       ModalRoute.of(context)?.isCurrent ?? false;
@@ -132,6 +143,12 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         reader.view.setTranslationMode('${mode.code}');
       }
       ''');
+
+    // Reset HUD stats when toggling translation mode.
+    _resetTranslateHud();
+    if (mode != TranslationModeEnum.off) {
+      _translateHudVisible = true;
+    }
   }
 
   Future<void> goToPercentage(double value) async {
@@ -594,6 +611,23 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
         callback: (args) {
           Map<String, dynamic> location = args[0];
           if (cfi == location['cfi']) return;
+
+          final newChapterHref = location['chapterHref'] ?? '';
+          final chapterChanged = newChapterHref != chapterHref;
+
+          // Keep HUD stats across page turns inside the same chapter.
+          // Only reset when chapter changes (or when user toggles mode / presses retry).
+          if (chapterChanged) {
+            _resetTranslateHud();
+          }
+
+          // Keep HUD visible when translation is enabled.
+          final mode = Prefs().getBookTranslationMode(widget.book.id);
+          if (mode != TranslationModeEnum.off &&
+              Prefs().pageTurnStyle != PageTurn.scroll) {
+            _translateHudVisible = true;
+          }
+
           // if (chapterHref != location['chapterHref']) {
           //   refreshToc();
           // }
@@ -807,16 +841,151 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     controller.addJavaScriptHandler(
       handlerName: 'translateText',
       callback: (args) async {
+        final text =
+            (args.isNotEmpty ? args[0]?.toString() : null)?.trim() ?? '';
+        if (text.isEmpty) return '';
+
+        // Translation settings are AI-only. Keep runtime stable regardless of
+        // historical prefs.
+        final service = TranslateService.aiFullText;
+        final from = Prefs().fullTextTranslateFrom;
+        final to = Prefs().fullTextTranslateTo;
+
+        final cacheKey = FullTextTranslateRuntime.instance.buildCacheKey(
+          bookId: widget.book.id,
+          service: service,
+          from: from,
+          to: to,
+          text: text,
+        );
+
+        // Update HUD stats
+        _translateHudVisible = true;
+        _hudMarkStart(cacheKey: cacheKey);
+
         try {
-          String text = args[0];
-          final service = Prefs().fullTextTranslateService;
+          final out = await FullTextTranslateRuntime.instance.translateWithMeta(
+            service,
+            text,
+            from,
+            to,
+            bookId: widget.book.id,
+          );
+
+          if (out.text.trim().isEmpty || _looksLikeTranslateFailure(out.text)) {
+            _hudMarkFail(
+              cacheKey: cacheKey,
+              reason: out.failureReason ??
+                  InlineFullTextTranslateFailureReason.translateError,
+            );
+            return '';
+          }
+
+          _hudMarkDone(cacheKey: cacheKey);
+          return out.text;
+        } catch (e) {
+          _hudMarkFail(
+            cacheKey: cacheKey,
+            reason: InlineFullTextTranslateFailureReason.exception,
+          );
+          AnxLog.severe('Translation error: $e');
+          return '';
+        } finally {
+          _hudMarkFinishInflight(cacheKey: cacheKey);
+        }
+      },
+    );
+
+    // Structured translation for paragraphs that contain links.
+    // Payload: { fullText: string, segments: [{type:'text'|'link', text, href?}] }
+    // Response: string[] translated texts aligned to segments
+    controller.addJavaScriptHandler(
+      handlerName: 'translateRichSegments',
+      callback: (args) async {
+        try {
+          if (args.isEmpty) return const <String>[];
+          final payload = args[0];
+          if (payload is! Map) return const <String>[];
+
+          final fullText = payload['fullText']?.toString().trim() ?? '';
+          final rawSegments = payload['segments'];
+          if (fullText.isEmpty || rawSegments is! List) {
+            return const <String>[];
+          }
+
+          // Translation settings are AI-only. Keep runtime stable regardless of
+          // historical prefs.
+          final service = TranslateService.aiFullText;
           final from = Prefs().fullTextTranslateFrom;
           final to = Prefs().fullTextTranslateTo;
 
-          return await service.provider.translateTextOnly(text, from, to);
+          // HUD counts per paragraph (fullText key), not per segment.
+          final cacheKey = FullTextTranslateRuntime.instance.buildCacheKey(
+            bookId: widget.book.id,
+            service: service,
+            from: from,
+            to: to,
+            text: fullText,
+          );
+
+          _translateHudVisible = true;
+          _hudMarkStart(cacheKey: cacheKey);
+
+          final futures = <Future<({String text, InlineFullTextTranslateFailureReason? failureReason})>>[];
+          for (final seg in rawSegments) {
+            if (seg is! Map) {
+              futures.add(
+                Future.value(
+                  (
+                    text: '',
+                    failureReason: InlineFullTextTranslateFailureReason.unknown,
+                  ),
+                ),
+              );
+              continue;
+            }
+            final segText = seg['text']?.toString() ?? '';
+            futures.add(
+              FullTextTranslateRuntime.instance.translateWithMeta(
+                service,
+                segText,
+                from,
+                to,
+                bookId: widget.book.id,
+              ),
+            );
+          }
+
+          final outcomes = await Future.wait(futures);
+          final results = outcomes.map((e) => e.text).toList(growable: false);
+
+          final hasAny = results.any((e) => e.trim().isNotEmpty);
+          if (!hasAny) {
+            // Pick the most common failure reason among segments.
+            final counts = <InlineFullTextTranslateFailureReason, int>{};
+            for (final o in outcomes) {
+              final r = o.failureReason ?? InlineFullTextTranslateFailureReason.unknown;
+              counts[r] = (counts[r] ?? 0) + 1;
+            }
+            InlineFullTextTranslateFailureReason best =
+                InlineFullTextTranslateFailureReason.unknown;
+            var bestCount = -1;
+            for (final entry in counts.entries) {
+              if (entry.value > bestCount) {
+                best = entry.key;
+                bestCount = entry.value;
+              }
+            }
+
+            _hudMarkFail(cacheKey: cacheKey, reason: best);
+          } else {
+            _hudMarkDone(cacheKey: cacheKey);
+          }
+
+          return results;
         } catch (e) {
-          AnxLog.severe('Translation error: $e');
-          return 'Translation error: $e';
+          // Do not throw into JS.
+          return const <String>[];
         }
       },
     );
@@ -903,6 +1072,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
 
   @override
   void dispose() {
+    _translateHud.dispose();
     _animationController?.dispose();
     saveReadingProgress();
     removeOverlay();
@@ -1162,6 +1332,236 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
     );
   }
 
+  bool _looksLikeTranslateFailure(String s) {
+    final t = s.trim();
+    if (t.isEmpty) return true;
+
+    final lower = t.toLowerCase();
+    if (lower.startsWith('error:')) return true;
+    if (lower.contains('translate error') || lower.contains('翻译错误')) return true;
+    if (lower.contains('authentication failed')) return true;
+    if (lower.contains('rate limit') || lower.contains('429')) return true;
+    if (lower.contains('ai service not configured')) return true;
+
+    return false;
+  }
+
+  void _resetTranslateHud() {
+    _translateHudItems.clear();
+    _translateHud.value = const _InlineTranslateHudState();
+    InlineFullTextTranslationStatusBus.instance.reset();
+  }
+
+  void _hudMarkStart({required String cacheKey}) {
+    final item = _translateHudItems[cacheKey];
+    if (item == null) {
+      _translateHudItems[cacheKey] = _InlineTranslateHudEntry.inflight;
+    } else {
+      // If already inflight/done/failed, do not double-count inflight.
+      if (item.status == _InlineTranslateHudItemStatus.inflight) return;
+      if (item.status == _InlineTranslateHudItemStatus.done) return;
+      // failed -> retry: move to inflight
+      _translateHudItems[cacheKey] = _InlineTranslateHudEntry.inflight;
+    }
+    _recomputeHud();
+  }
+
+  void _hudMarkDone({required String cacheKey}) {
+    final item = _translateHudItems[cacheKey];
+    if (item == null) return;
+    _translateHudItems[cacheKey] = _InlineTranslateHudEntry.done;
+    _recomputeHud();
+  }
+
+  void _hudMarkFail({
+    required String cacheKey,
+    InlineFullTextTranslateFailureReason reason =
+        InlineFullTextTranslateFailureReason.unknown,
+  }) {
+    final item = _translateHudItems[cacheKey];
+    if (item == null) return;
+    _translateHudItems[cacheKey] = _InlineTranslateHudEntry.failed(reason);
+    _recomputeHud();
+  }
+
+  void _hudMarkFinishInflight({required String cacheKey}) {
+    final item = _translateHudItems[cacheKey];
+    if (item?.status == _InlineTranslateHudItemStatus.inflight) {
+      // If we end inflight without marking done/fail, treat as failed.
+      _translateHudItems[cacheKey] = _InlineTranslateHudEntry.failed(
+        InlineFullTextTranslateFailureReason.unknown,
+      );
+      _recomputeHud();
+    }
+  }
+
+  void _recomputeHud() {
+    var inflight = 0;
+    var done = 0;
+    var failed = 0;
+
+    final reasonCounts = <InlineFullTextTranslateFailureReason, int>{};
+
+    for (final v in _translateHudItems.values) {
+      switch (v.status) {
+        case _InlineTranslateHudItemStatus.inflight:
+          inflight++;
+          break;
+        case _InlineTranslateHudItemStatus.done:
+          done++;
+          break;
+        case _InlineTranslateHudItemStatus.failed:
+          failed++;
+          final reason =
+              v.failureReason ?? InlineFullTextTranslateFailureReason.unknown;
+          reasonCounts[reason] = (reasonCounts[reason] ?? 0) + 1;
+          break;
+      }
+    }
+
+    final updatedAtMs = DateTime.now().millisecondsSinceEpoch;
+
+    _translateHud.value = _InlineTranslateHudState(
+      total: _translateHudItems.length,
+      inflight: inflight,
+      done: done,
+      failed: failed,
+      updatedAtMs: updatedAtMs,
+    );
+
+    InlineFullTextTranslationStatusBus.instance.update(
+      total: _translateHudItems.length,
+      inflight: inflight,
+      done: done,
+      failed: failed,
+      failureReasons: reasonCounts,
+    );
+  }
+
+  Widget _inlineTranslateHud() {
+    if (!_translateHudVisible) return const SizedBox.shrink();
+
+    // Do not show translation HUD in scroll mode (user preference).
+    if (Prefs().pageTurnStyle == PageTurn.scroll) {
+      return const SizedBox.shrink();
+    }
+
+    final mode = Prefs().getBookTranslationMode(widget.book.id);
+    if (mode == TranslationModeEnum.off) return const SizedBox.shrink();
+
+    final topPadding = MediaQuery.of(context).padding.top;
+
+    return Positioned(
+      top: topPadding + 8,
+      right: 8,
+      child: ValueListenableBuilder<_InlineTranslateHudState>(
+        valueListenable: _translateHud,
+        builder: (context, s, _) {
+          final shouldShow = s.total > 0 || s.inflight > 0;
+          if (!shouldShow) return const SizedBox.shrink();
+
+          final text = '译 ${s.done}/${s.total}'
+              '${s.inflight > 0 ? ' · ${s.inflight}中' : ''}'
+              '${s.failed > 0 ? ' · 失败${s.failed}' : ''}';
+
+          return Material(
+            color: Theme.of(context).colorScheme.surface.withAlpha(230),
+            elevation: 3,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (s.inflight > 0)
+                    const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  if (s.inflight > 0) const SizedBox(width: 8),
+                  Text(text, style: Theme.of(context).textTheme.bodySmall),
+                  if (s.failed > 0 || s.inflight == 0) ...[
+                    const SizedBox(width: 6),
+                    InkWell(
+                      onTap: () async {
+                        // Manual retry: reset counters to avoid stacking, then
+                        // force re-translate current + next viewport.
+                        resetInlineTranslateHudStats();
+
+                        ({int started, int candidates})? parseStats(dynamic v) {
+                          try {
+                            if (v is Map) {
+                              final started = (v['started'] as num?)?.toInt();
+                              final candidates =
+                                  (v['candidates'] as num?)?.toInt();
+                              if (started != null && candidates != null) {
+                                return (started: started, candidates: candidates);
+                              }
+                            }
+                          } catch (_) {}
+                          return null;
+                        }
+
+                        try {
+                          final result = await webViewController
+                              .callAsyncJavaScript(functionBody: '''
+if (typeof reader !== 'undefined' && reader.view && reader.view.forceTranslateForViewport) {
+  return await reader.view.forceTranslateForViewport(true);
+}
+return null;
+''');
+
+                          final stats = parseStats(result?.value);
+                          if (stats != null) {
+                            InlineFullTextTranslationStatusBus.instance
+                                .reportManualRetry(
+                              started: stats.started,
+                              candidates: stats.candidates,
+                            );
+                          }
+                        } catch (_) {}
+                      },
+                      child: const Icon(Icons.refresh, size: 16),
+                    ),
+                  ],
+                  const SizedBox(width: 6),
+                  InkWell(
+                    onTap: () {
+                      setState(() {
+                        _translateHudVisible = false;
+                      });
+                    },
+                    child: const Icon(Icons.close, size: 16),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void showInlineTranslateHud() {
+    // Scroll mode explicitly hides the HUD.
+    if (Prefs().pageTurnStyle == PageTurn.scroll) return;
+
+    if (!_translateHudVisible) {
+      setState(() {
+        _translateHudVisible = true;
+      });
+    }
+  }
+
+  /// Reset HUD counters (used by manual retry).
+  void resetInlineTranslateHudStats() {
+    _resetTranslateHud();
+    if (Prefs().pageTurnStyle != PageTurn.scroll) {
+      _translateHudVisible = true;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     String uri = Uri.encodeComponent(widget.book.fileFullPath);
@@ -1179,6 +1579,7 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
             buildWebviewWithIOSWorkaround(context, url, initialCfi),
             readingInfoWidget(),
             if (showHistory) _buildHistoryCapsule(),
+            _inlineTranslateHud(),
             if (Prefs().openBookAnimation)
               SizedBox.expand(
                   child: IgnorePointer(
@@ -1189,6 +1590,70 @@ class EpubPlayerState extends ConsumerState<EpubPlayer>
           ],
         ),
       ),
+    );
+  }
+}
+
+enum _InlineTranslateHudItemStatus {
+  inflight,
+  done,
+  failed,
+}
+
+class _InlineTranslateHudEntry {
+  const _InlineTranslateHudEntry({
+    required this.status,
+    this.failureReason,
+  });
+
+  final _InlineTranslateHudItemStatus status;
+  final InlineFullTextTranslateFailureReason? failureReason;
+
+  static const inflight = _InlineTranslateHudEntry(
+    status: _InlineTranslateHudItemStatus.inflight,
+  );
+  static const done = _InlineTranslateHudEntry(
+    status: _InlineTranslateHudItemStatus.done,
+  );
+
+  static _InlineTranslateHudEntry failed(
+    InlineFullTextTranslateFailureReason reason,
+  ) {
+    return _InlineTranslateHudEntry(
+      status: _InlineTranslateHudItemStatus.failed,
+      failureReason: reason,
+    );
+  }
+}
+
+class _InlineTranslateHudState {
+  const _InlineTranslateHudState({
+    this.total = 0,
+    this.inflight = 0,
+    this.done = 0,
+    this.failed = 0,
+    this.updatedAtMs = 0,
+  });
+
+  final int total;
+  final int inflight;
+  final int done;
+  final int failed;
+  final int updatedAtMs;
+
+  _InlineTranslateHudState copyWith({
+    int? total,
+    int? inflight,
+    int? done,
+    int? failed,
+    int? updatedAtMs,
+  }) {
+    return _InlineTranslateHudState(
+      total: total ?? this.total,
+      inflight: inflight ?? this.inflight,
+      done: done ?? this.done,
+      failed: failed ?? this.failed,
+      updatedAtMs: updatedAtMs ?? this.updatedAtMs,
     );
   }
 }

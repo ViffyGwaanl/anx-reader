@@ -21,14 +21,14 @@ import 'package:anx_reader/service/ai/tools/repository/groups_repository.dart';
 import 'package:anx_reader/service/ai/tools/repository/notes_repository.dart';
 import 'package:anx_reader/service/ai/tools/repository/reading_history_repository.dart';
 import 'package:anx_reader/service/ai/tools/repository/tag_repository.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod/riverpod.dart';
 import 'package:langchain_core/tools.dart';
 
 /// Context object shared by AI tools so builders don't need long constructors.
 class AiToolContext {
   AiToolContext({required this.ref});
 
-  final WidgetRef ref;
+  final Ref ref;
 
   late final NotesRepository notesRepository = NotesRepository();
   late final BooksRepository booksRepository = BooksRepository();

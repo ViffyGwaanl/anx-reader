@@ -191,6 +191,18 @@ export class View extends HTMLElement {
 
     if (cfi && (!this.#lastCfi || cfi !== this.#lastCfi)) {
       this.#lastCfi = cfi
+
+      // When translation is enabled, proactively translate the current + next
+      // viewport on every relocate. This fixes cases where IntersectionObserver
+      // does not trigger when navigating back/forward.
+      try {
+        if (this.#translator.getTranslationMode() !== TranslationMode.OFF) {
+          this.#translator.forceTranslateForViewport?.()
+        }
+      } catch (e) {
+        // ignore
+      }
+
       this.#emit('relocate', this.lastLocation)
     }
   }
@@ -599,6 +611,36 @@ export class View extends HTMLElement {
   
   clearTranslations() {
     this.#translator.clearTranslations()
+
+    // Re-observe current document and restart translation if needed.
+    try {
+      const doc = this.renderer.getContents()[0]?.doc
+      if (doc) {
+        this.#translator.observeDocument(doc)
+      }
+    } catch (_) {}
+
+    try {
+      if (this.#translator.getTranslationMode?.() !== 'off') {
+        this.#translator.forceTranslateForViewport?.()
+      }
+    } catch (_) {}
+  }
+
+  // force=true means: ignore per-element max retry cap and treat as manual retry.
+  forceTranslateForViewport(force = false) {
+    try {
+      const doc = this.renderer.getContents()[0]?.doc
+      if (doc) {
+        this.#translator.observeDocument(doc)
+      }
+    } catch (_) {}
+
+    if (force && this.#translator.forceRetryForViewport) {
+      return this.#translator.forceRetryForViewport()
+    }
+
+    return this.#translator.forceTranslateForViewport?.()
   }
 }
 

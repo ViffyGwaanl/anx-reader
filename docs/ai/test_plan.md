@@ -1,44 +1,71 @@
-# AI Panel / Sync / Backup — Test Plan
+# AI Panel / Provider Center / Streaming — Test Plan
 
 ## Devices / Platforms
 
 - iPadOS (>=600 width, e.g. iPad 11")
 - iOS iPhone (<600 width)
-- Android tablet/phone
+- Android tablet/phone (optional)
 - Desktop (optional)
 
-## PR-1 Dock Resize
+---
+
+## 1) Reading-page AI panel UX
+
+### Dock mode (iPad)
 
 - [ ] Drag divider adjusts width/height smoothly
-- [ ] 16px hit target works with finger
+- [ ] 16px+ hit target works with finger
 - [ ] Width/height persists after leaving/returning reading page
 - [ ] Clamp works (min/max)
+- [ ] Dock-left: drawer edge swipe disabled; TOC button still opens drawer
 
-## PR-2 Bottom Sheet (legacy resizable)
+### Bottom-sheet mode (iPhone + iPad optional)
 
-> 注意：PR-8 已将 bottom sheet 收敛为 fixed large height（取消难用的拖拽调大小）。
-> 若需要回归验证旧实现，可在 PR-2 分支单独验证。
+- [ ] Opens expanded by default on reading page
+- [ ] Can minimize to bar (0.12)
+- [ ] Snap points work (0.12/0.35/0.6/0.9/0.95)
+- [ ] Minimize/expand does not cause layout assertions
 
-- [ ] （可选）Drag handle changes height
-- [ ] （可选）Snap points: 0.35/0.6/0.9/0.95
-- [ ] （可选）Reopen remembers last size
+### Streaming continuity (root-cause acceptance)
 
-## PR-3 iPad Panel Mode + Dock Side
+- [ ] Start generation → minimize → keep reading (scroll/flip pages) → expand → generation continued
+- [ ] Start generation → close the sheet (X) → keep reading → reopen AI → final result exists
+- [ ] Start generation → background/foreground app → generation does not crash (behavior may depend on OS; at minimum no asserts)
+- [ ] Stop button cancels immediately
 
-- [ ] dock-right default unchanged
-- [ ] dock-left order correct
-- [ ] dock-left disables drawer edge swipe
-- [ ] TOC button still opens drawer
-- [ ] iPad bottomSheet mode forces modal sheet
+---
 
-## PR-4 Font Scale
+## 2) Chat UX / Conversation tree v2
 
-- [ ] Slider updates markdown + input
-- [ ] Persisted between opens
-- [ ] Reset returns to 1.0
-- [ ] UI does not auto-dismiss (especially when AI chat is inside a bottom sheet)
+- [ ] Variant switcher works (left/right) for assistant groups
+- [ ] Edit a prior user message and regenerate creates a new branch (old preserved)
+- [ ] Switch back to old variant restores previous subtree
+- [ ] Reading page rollback behaves same as non-reading chat
 
-## PR-5 Quick Prompts Config
+---
+
+## 3) Provider Center
+
+- [ ] Provider list shows built-ins + custom providers
+- [ ] Enable/disable provider works
+- [ ] Apply provider updates in-chat provider immediately
+- [ ] In-chat provider + model switch persists
+
+---
+
+## 4) Thinking / Tools display
+
+- [ ] Gemini includeThoughts=ON shows Thinking section
+- [ ] OpenAI-compatible backend returning `reasoning_content` shows Thinking section
+- [ ] OpenAI-compatible backend **without** `reasoning_content`: no Thinking section (no prompt-based fallback)
+- [ ] thinkingMode=off does NOT request thinking, but if backend still returns reasoning_content it is displayed
+- [ ] Tools timeline renders and collapses/expands
+
+---
+
+## 5) Config / Sync / Backup
+
+### Quick prompts
 
 - [ ] Defaults shown when no custom list
 - [ ] Custom list shows enabled chips only
@@ -46,49 +73,16 @@
 - [ ] Reset clears custom list
 - [ ] User prompt editor maxLength = 20000
 
-## PR-6 WebDAV AI settings sync
+### WebDAV AI settings sync
 
-- [ ] Upload/download ai_settings.json
-- [ ] Does not sync api_key
-- [ ] Conflict resolution uses updatedAt
+- [ ] Upload/download `anx/config/ai_settings.json`
+- [ ] Does not sync `api_key`
+- [ ] Conflict resolution uses `updatedAt` newer-wins
 
-## PR-7 Backup/Restore enhancements
+### Backup/Restore
 
 - [ ] Export/import via Files works on iOS
 - [ ] Clear warning about overwrite (pre-import confirmation)
 - [ ] Optional encrypted api_key flow (password prompt)
 - [ ] Rollback on failure (rename `.bak.<ts>` restore)
 - [ ] Unit: `flutter test test/service/backup_crypto_test.dart`
-
-## PR-8 Reading/AI UX hotfix
-
-- [ ] Bookshelf page: no red `bottom overflowed by 1.00 pixels` warnings
-- [ ] Bottom sheet: opens at large fixed height (~95%), swipe-down dismiss works
-- [ ] Reading page: swipe up from lower-middle region opens AI bottom sheet
-- [ ] Font scale: dialog stays open; slider works; persisted
-
-## PR-9 AI provider configuration UX
-
-- [ ] Editing is stable (no cursor jumps while typing)
-- [ ] Basic fields work: url/baseUrl, model, api_key (hide/show)
-- [ ] Test button reports actionable errors (401/404/model-not-found/network)
-- [ ] Advanced fields (if implemented): headers/temperature/top_p/max_tokens persisted
-
-## PR-10 AI translation hardening
-
-- [ ] Selection translation: detailed (glossary/notes allowed)
-- [ ] Full-text translation: translation-only (no extra analysis blocks)
-- [ ] Long paragraphs are chunked or capped to reduce failure rate
-- [ ] PDF: safe fallback behavior (selection preferred)
-
-## PR-11 PDF AI chaptering
-
-- [ ] PDF with outline: chapter content returns multi-page range
-- [ ] PDF without outline: current chapter uses page-window context
-
-## PR-12 MinerU OCR (scanned PDFs)
-
-- [ ] OCR job can be started and cached
-- [ ] After OCR, AI chapter/page tools return meaningful text
-- [ ] No repeated OCR runs once cached
-

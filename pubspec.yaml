@@ -92,6 +92,7 @@ dependencies:
   http: ^1.3.0
   web_socket_channel: ^3.0.2
   crypto: ^3.0.6
+  cryptography: ^2.7.0
   audioplayers: ^6.4.0
   in_app_purchase: ^3.2.1
   asn1lib: ^1.6.2
@@ -106,11 +107,10 @@ dependencies:
   langchain: ^0.8.1
   langchain_anthropic: ^0.3.1
   langchain_google: ^0.7.1+2
-  langchain_openai: 0.8.1+1
-    # git:
-    #   url: https://github.com/Anxcye/langchain_dart.git
-    #   ref: bb06c17ca667a906e3e37154b0bda95023d0c9bd
-    #   path: packages/langchain_openai
+  langchain_openai:
+    path: packages/langchain_openai
+    # Upstream reference:
+    #   version: 0.8.1+1
   langchain_core: ^0.4.1
   skeletonizer: ^2.1.0+1
   scrollable_positioned_list: ^0.3.8

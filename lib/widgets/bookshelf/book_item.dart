@@ -86,33 +86,38 @@ class BookItem extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 5),
+          // Avoid small pixel overflows on some devices by giving a slightly
+          // more relaxed height and using Expanded for the title row.
           SizedBox(
-            height: 55,
+            height: 58,
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        book.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 13,
+                Expanded(
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          book.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
-                    ),
-                    if (Prefs().webdavStatus)
-                      SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: BookSyncStatusIcon(
-                          syncStatus: bookSyncStatus,
+                      if (Prefs().webdavStatus)
+                        SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: BookSyncStatusIcon(
+                            syncStatus: bookSyncStatus,
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
                 Row(
                   children: [
@@ -120,17 +125,19 @@ class BookItem extends ConsumerWidget {
                       child: Text(
                         book.author,
                         style: const TextStyle(
-                            fontWeight: FontWeight.w300,
-                            fontSize: 9,
-                            overflow: TextOverflow.ellipsis),
+                          fontWeight: FontWeight.w300,
+                          fontSize: 9,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ),
                     Text(
                       '${(book.readingPercentage * 100).toStringAsFixed(0)}%',
                       style: const TextStyle(
-                          fontWeight: FontWeight.w300,
-                          fontSize: 9,
-                          overflow: TextOverflow.ellipsis),
+                        fontWeight: FontWeight.w300,
+                        fontSize: 9,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ],
                 ),

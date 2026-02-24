@@ -19,6 +19,16 @@ flutter gen-l10n
 dart run build_runner build --delete-conflicting-outputs
 ```
 
+## Developer (fork): switching branches may change path dependencies
+
+The fork may use local path dependencies (e.g. `packages/langchain_openai`).
+
+If you switch branches and see pub resolution errors, always run:
+
+```bash
+flutter pub get
+```
+
 ## iOS: Archive shows old build number (TestFlight)
 
 If you changed `pubspec.yaml` `version: x.y.z+BUILD` but Xcode Archive still shows the old build number:
@@ -36,6 +46,15 @@ flutter build ios --release --no-codesign
 
 Then Archive again.
 
+## Reading-page AI: minimize should not interrupt streaming (fork)
+
+If minimizing the bottom sheet interrupts generation:
+
+- Confirm you are on the latest `feat/ai-all-in-one`.
+- Export logs after reproducing (Settings → More → Advanced → Logs).
+
+The fork moved streaming ownership into `aiChatProvider` so UI minimize/close should not cancel.
+
 ## Translation: AI full-text translation looks weird or fails
 
 - Full-text translation works best for reflowable formats (ePub, txt). PDF text layers are often fragmented or missing.
@@ -43,6 +62,23 @@ Then Archive again.
   - prefer translating a **short selection** first to confirm the provider works
   - if long paragraphs fail, reduce the translated chunk size (or try a non-AI provider)
 - For scanned PDFs (no selectable text): OCR is required before translation can be reliable.
+
+## PaperTok (Papers feed) issues (fork)
+
+### PaperTok images / EPUB / PDF show 404
+
+- PaperTok may return **relative URLs** like `/static/epub/...` or `/static/pdfs/...`.
+- Ensure the client is using the canonical base URL (default: `https://papertok.ai`).
+- Verify the artifact exists:
+  - `https://papertok.ai/static/epub/<external_id>/<external_id>.en.epub`
+  - `https://papertok.ai/static/pdfs/<external_id>.pdf`
+
+### Import succeeds but doesn’t auto-open
+
+- In this fork, PaperTok import uses a dedicated “download → import → open Reading Page” flow.
+- If it doesn’t auto-open, export logs (Settings → More Settings → Advanced → Logs) and check for WebView errors during metadata extraction.
+
+---
 
 ## Unable to Import Books
 - Ensure the book format is supported. Please check the supported formats in the [README](../README.md).
@@ -72,6 +108,16 @@ flutter gen-l10n
 dart run build_runner build --delete-conflicting-outputs
 ```
 
+## 开发者（fork）：切分支后 pub 依赖可能变化
+
+fork 里可能使用 path 依赖（例如 `packages/langchain_openai`）。
+
+切分支后如果遇到依赖解析问题，先执行：
+
+```bash
+flutter pub get
+```
+
 ## iOS：Archive 仍显示旧的 Build Number（TestFlight）
 
 如果你改了 `pubspec.yaml` 的 `version: x.y.z+BUILD`，但 Xcode Archive 里仍然显示旧的 Build Number：
@@ -88,6 +134,15 @@ flutter build ios --release --no-codesign
 ```
 
 然后再 Archive。
+
+## 阅读页 AI：最小化不应中断生成（fork）
+
+如果你发现 bottom sheet 最小化后中断生成：
+
+- 确认已更新到 `feat/ai-all-in-one` 最新提交
+- 重现后导出日志（设置 → 更多设置 → 高级 → 日志）
+
+fork 已将 streaming 所有权迁移到 `aiChatProvider`，UI 最小化/关闭不应取消生成。
 
 ## 翻译：AI 全文翻译效果怪 / 无法翻译
 

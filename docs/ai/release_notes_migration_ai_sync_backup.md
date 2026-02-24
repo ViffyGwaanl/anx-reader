@@ -1,13 +1,15 @@
-# Release Notes / Migration Notes — AI sync & backup
+# Release Notes / Migration Notes — AI sync, backup, Provider Center, streaming
 
-This note summarizes user-visible behavior changes introduced by PR-6 (WebDAV AI settings sync), PR-7 (Backup v4 + optional encrypted API keys), and PR-8 (Reading/AI UX hotfix).
+This note summarizes user-visible behavior changes introduced by the AI stack on the fork (`feat/ai-all-in-one`).
 
-## PR-6 — WebDAV AI settings sync (no API key)
+---
+
+## 1) WebDAV AI settings sync (no API key)
 
 ### What users get
 
-- AI configuration (url/model/prompts/UI prefs) can be synced via WebDAV.
-- This reduces repetitive setup across devices.
+- AI configuration (provider list + url/model/prompts/UI prefs) can be synced via WebDAV.
+- Reduces repetitive setup across devices.
 
 ### Security policy
 
@@ -16,13 +18,10 @@ This note summarizes user-visible behavior changes introduced by PR-6 (WebDAV AI
 ### Merge semantics
 
 - Phase 1: whole-file snapshot `updatedAt` newer-wins.
-- If two devices change settings, the snapshot with newer timestamp overwrites the other.
 
-### Troubleshooting
+---
 
-- If you see “model not found” after a sync, it usually means a newer snapshot overwrote your url/model pair. Reconfigure the desired provider and sync again.
-
-## PR-7 — Manual backup/restore v4 (Files/iCloud) + optional encrypted API keys
+## 2) Manual backup/restore v4 (Files/iCloud) + optional encrypted API keys
 
 ### What users get
 
@@ -32,35 +31,46 @@ This note summarizes user-visible behavior changes introduced by PR-6 (WebDAV AI
 
 ### Security policy
 
-- Plain prefs backup file `anx_shared_prefs.json` **never contains** `api_key`.
-- Importing a backup **never overwrites/clears** existing local API keys.
+- Plain prefs backup **never contains** `api_key`.
+- Importing a plaintext backup **never overwrites/clears** existing local API keys.
 - API keys are only restored when:
   - the backup was created with encrypted API keys enabled, and
   - the correct password is provided during import.
 
-### Password recovery
+---
 
-- Password cannot be recovered. If forgotten, encrypted API keys cannot be restored.
-
-### Backward compatibility
-
-- Importing older v3 backups remains supported.
-- Older app versions importing v4 backups:
-  - may restore files/db/prefs
-  - will ignore/skip encrypted API key restoration (expected)
-
-### Failure recovery
-
-- Import creates `.bak.<timestamp>` backups and rolls back if any step fails.
-
-## PR-8 — Reading/AI UX hotfix
+## 3) Provider Center (Cherry-inspired)
 
 ### What users get
 
-- AI font scale popup is stable (no auto-dismiss while trying to adjust).
-- Bottom sheet AI chat opens at a large fixed height (~95%) to reduce resize frustration.
-- In bottom-sheet mode, swipe up from the lower-middle of the reading page to open AI (no need to open the menu first).
-- Bookshelf layout avoids 1px overflow warnings on some devices.
+- A dedicated Provider Center to manage:
+  - built-in providers
+  - custom providers
+  - enable/disable
+  - apply/select provider
+- In-chat provider/model switching.
+
+---
+
+## 4) Reading page AI bottom sheet: minimize/continue streaming
+
+### What users get
+
+- Bottom sheet can be minimized to a small bar so you can keep reading.
+- **Streaming is provider-managed** (not UI-managed): minimizing/closing the panel should not interrupt ongoing generation.
+
+### Notes
+
+- “Stop” still cancels generation immediately.
+
+---
+
+## 5) Thinking content display
+
+- Gemini: optional includeThoughts to display Thinking section.
+- OpenAI-compatible: if backend returns `reasoning_content`/`reasoning`, it is displayed as Thinking content.
+
+---
 
 ## Recommended user guidance
 

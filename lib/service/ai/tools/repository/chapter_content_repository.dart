@@ -1,6 +1,6 @@
 import 'package:anx_reader/providers/chapter_content_bridge.dart';
 import 'package:anx_reader/providers/current_reading.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod/riverpod.dart';
 
 class ChapterContentRepository {
   const ChapterContentRepository();
@@ -19,7 +19,7 @@ class ChapterContentRepository {
   }
 
   Future<String> fetchCurrent(
-    WidgetRef ref, {
+    Ref ref, {
     int? maxCharacters,
   }) async {
     final readingState = ref.read(currentReadingProvider);
@@ -38,7 +38,7 @@ class ChapterContentRepository {
   }
 
   Future<String> fetchByHref(
-    WidgetRef ref, {
+    Ref ref, {
     required String href,
     int? maxCharacters,
   }) async {

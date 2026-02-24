@@ -7,6 +7,8 @@ import 'package:anx_reader/providers/ai_chat.dart';
 import 'package:anx_reader/providers/ai_history.dart';
 import 'package:anx_reader/service/ai/ai_services.dart';
 import 'package:anx_reader/service/ai/ai_history.dart';
+import 'package:anx_reader/models/ai_provider_meta.dart';
+import 'package:anx_reader/enums/ai_thinking_mode.dart';
 import 'package:anx_reader/service/ai/index.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/utils/ai_reasoning_parser.dart';
@@ -32,12 +34,22 @@ class AiChatStream extends ConsumerStatefulWidget {
     this.sendImmediate = false,
     this.quickPromptChips = const [],
     this.trailing,
+    this.scrollController,
+    this.onRequestMinimize,
   });
 
   final String? initialMessage;
   final bool sendImmediate;
   final List<AiQuickPromptChip> quickPromptChips;
   final List<Widget>? trailing;
+
+  /// Optional external scroll controller used for the message list.
+  ///
+  /// This is mainly for integrating with [DraggableScrollableSheet].
+  final ScrollController? scrollController;
+
+  /// Optional callback used by bottom-sheet mode to minimize the sheet.
+  final VoidCallback? onRequestMinimize;
 
   @override
   ConsumerState<AiChatStream> createState() => AiChatStreamState();
@@ -46,17 +58,43 @@ class AiChatStream extends ConsumerStatefulWidget {
 class AiChatStreamState extends ConsumerState<AiChatStream> {
   final TextEditingController inputController = TextEditingController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  Stream<List<ChatMessage>>? _messageStream;
-  StreamController<List<ChatMessage>>? _messageController;
-  StreamSubscription<List<ChatMessage>>? _messageSubscription;
-  final ScrollController _scrollController = ScrollController();
-  bool _isStreaming = false;
-  late List<AiServiceOption> _serviceOptions;
-  late String _selectedServiceId;
+
+  late ScrollController _scrollController;
+  bool _ownsScrollController = false;
+
+  bool get _isStreaming => ref.read(aiChatStreamingProvider);
+
+  // Bottom sheet convenience gesture: swipe down on input box to minimize.
+  double _inputSwipeDownDy = 0;
+
+  // Auto-scroll behavior:
+  // - Do NOT jump to bottom when opening the panel.
+  // - While streaming, only keep scrolling if the user is already near bottom.
+  bool _pinnedToBottom = false;
+
+  // For each user turn, the assistant may have multiple generated variants.
+  // We keep a lightweight UI-only selection index per turn.
+  final Map<int, int> _selectedVariantByUserIndex = {};
+
+  late final List<AiServiceOption> _builtInOptions;
+  late final Map<String, AiServiceOption> _builtInById;
+  late List<AiProviderMeta> _providers;
+  late String _selectedProviderId;
+
   late List<String> _suggestedPrompts;
   late List<String> _starterPrompts;
+  bool _starterPromptsReady = false;
 
   List<Map<String, String>> _getQuickPrompts(BuildContext context) {
+    // Use customized prompts if available.
+    final custom = Prefs().aiInputQuickPrompts;
+    if (custom.isNotEmpty) {
+      return custom
+          .where((p) => p.enabled)
+          .map((p) => {'label': p.label, 'prompt': p.prompt})
+          .toList();
+    }
+    // Fall back to localized defaults.
     return [
       {
         'label': L10n.of(context).aiQuickPromptExplain,
@@ -81,71 +119,468 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     ];
   }
 
+  void _handleScroll() {
+    // Be defensive: scroll controller may be swapped/rebuilt by the sheet.
+    try {
+      if (!_scrollController.hasClients) return;
+      final max = _scrollController.position.maxScrollExtent;
+      final offset = _scrollController.offset;
+      // Within 120px counts as "at bottom".
+      _pinnedToBottom = (max - offset) < 120;
+    } catch (_) {
+      // Ignore (e.g. controller disposed during rebuild).
+    }
+  }
+
+  void _attachScrollController(ScrollController? external) {
+    // Detach old controller.
+    try {
+      _scrollController.removeListener(_handleScroll);
+    } catch (_) {}
+
+    if (_ownsScrollController) {
+      try {
+        _scrollController.dispose();
+      } catch (_) {}
+    }
+
+    _ownsScrollController = external == null;
+    _scrollController = external ?? ScrollController();
+    _scrollController.addListener(_handleScroll);
+  }
+
   @override
   void initState() {
     super.initState();
-    _starterPrompts = [
-      L10n.of(navigatorKey.currentContext!).quickPrompt1,
-      L10n.of(navigatorKey.currentContext!).quickPrompt2,
-      L10n.of(navigatorKey.currentContext!).quickPrompt3,
-      L10n.of(navigatorKey.currentContext!).quickPrompt4,
-      L10n.of(navigatorKey.currentContext!).quickPrompt5,
-      L10n.of(navigatorKey.currentContext!).quickPrompt6,
-      L10n.of(navigatorKey.currentContext!).quickPrompt7,
-      L10n.of(navigatorKey.currentContext!).quickPrompt8,
-      L10n.of(navigatorKey.currentContext!).quickPrompt9,
-      L10n.of(navigatorKey.currentContext!).quickPrompt10,
-      L10n.of(navigatorKey.currentContext!).quickPrompt11,
-      L10n.of(navigatorKey.currentContext!).quickPrompt12,
-    ];
-    _serviceOptions = buildDefaultAiServices();
-    _selectedServiceId = Prefs().selectedAiService;
-    final availableIds = _serviceOptions.map((option) => option.identifier);
-    if (!availableIds.contains(_selectedServiceId)) {
-      _selectedServiceId = _serviceOptions.first.identifier;
-      Prefs().selectedAiService = _selectedServiceId;
+
+    _scrollController = ScrollController();
+    _attachScrollController(widget.scrollController);
+
+    _starterPrompts = const [];
+    _builtInOptions = buildDefaultAiServices();
+    _builtInById = {
+      for (final option in _builtInOptions) option.identifier: option,
+    };
+
+    _ensureProvidersInitialized();
+    _providers = Prefs().aiProvidersV1;
+
+    _selectedProviderId = Prefs().selectedAiService;
+    if (!_isProviderSelectable(_selectedProviderId)) {
+      _selectedProviderId = _fallbackProviderId(_providers);
+      Prefs().selectedAiService = _selectedProviderId;
     }
     inputController.text = widget.initialMessage ?? '';
-    _suggestedPrompts = _pickSuggestedPrompts();
+    _suggestedPrompts = const [];
     if (widget.sendImmediate) {
       _sendMessage();
     }
-    _scrollToBottom();
+  }
+
+  @override
+  void didUpdateWidget(covariant AiChatStream oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    if (oldWidget.scrollController != widget.scrollController) {
+      _attachScrollController(widget.scrollController);
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // Initialize localized starter prompts using the widget's own context.
+    // Avoid depending on a global navigator context in initState.
+    if (!_starterPromptsReady) {
+      final l10n = L10n.of(context);
+      _starterPrompts = [
+        l10n.quickPrompt1,
+        l10n.quickPrompt2,
+        l10n.quickPrompt3,
+        l10n.quickPrompt4,
+        l10n.quickPrompt5,
+        l10n.quickPrompt6,
+        l10n.quickPrompt7,
+        l10n.quickPrompt8,
+        l10n.quickPrompt9,
+        l10n.quickPrompt10,
+        l10n.quickPrompt11,
+        l10n.quickPrompt12,
+      ];
+      _suggestedPrompts = _pickSuggestedPrompts();
+      _starterPromptsReady = true;
+    }
   }
 
   @override
   void dispose() {
     inputController.dispose();
-    _messageSubscription?.cancel();
-    _messageController?.close();
-    _scrollController.dispose();
+    try {
+      _scrollController.removeListener(_handleScroll);
+    } catch (_) {}
+    if (_ownsScrollController) {
+      _scrollController.dispose();
+    }
     super.dispose();
   }
 
-  AiServiceOption get _currentService => _serviceOptions.firstWhere(
-        (option) => option.identifier == _selectedServiceId,
-        orElse: () => _serviceOptions.first,
-      );
+  void _ensureProvidersInitialized() {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final builtIns = _builtInOptions.map((option) {
+      final type = switch (option.identifier) {
+        'claude' => AiProviderType.anthropic,
+        'gemini' => AiProviderType.gemini,
+        'openai-responses' => AiProviderType.openaiResponses,
+        _ => AiProviderType.openaiCompatible,
+      };
 
-  String _modelLabel(String serviceId) {
-    final option = _serviceOptions.firstWhere(
-      (element) => element.identifier == serviceId,
-      orElse: () => _serviceOptions.first,
-    );
-    final stored = Prefs().getAiConfig(serviceId);
-    final model = stored['model'];
-    if (model != null && model.trim().isNotEmpty) {
-      return model;
-    }
-    return option.defaultModel;
+      return AiProviderMeta(
+        id: option.identifier,
+        name: option.title,
+        type: type,
+        enabled: true,
+        isBuiltIn: true,
+        createdAt: now,
+        updatedAt: now,
+        logoKey: option.logo,
+      );
+    }).toList(growable: false);
+
+    Prefs().ensureAiProvidersV1Initialized(builtIns: builtIns);
   }
 
-  void _onServiceSelected(String identifier) {
-    if (_isStreaming || identifier == _selectedServiceId) return;
-    Prefs().selectedAiService = identifier;
+  AiProviderMeta? _providerById(String id) {
+    for (final p in _providers) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  bool _isProviderSelectable(String id) {
+    final p = _providerById(id);
+    return p != null && p.enabled;
+  }
+
+  String _fallbackProviderId(List<AiProviderMeta> providers) {
+    for (final p in providers) {
+      if (p.id == 'openai' && p.enabled) return p.id;
+    }
+    for (final p in providers) {
+      if (p.enabled) return p.id;
+    }
+    return 'openai';
+  }
+
+  AiProviderMeta get _currentProvider {
+    return _providerById(_selectedProviderId) ??
+        (_providers.isNotEmpty
+            ? _providers.first
+            : AiProviderMeta(
+                id: 'openai',
+                name: 'OpenAI',
+                type: AiProviderType.openaiCompatible,
+                enabled: true,
+                isBuiltIn: true,
+                createdAt: 0,
+                updatedAt: 0,
+              ));
+  }
+
+  AiServiceOption? _builtInOptionForProvider(AiProviderMeta meta) {
+    final exact = _builtInById[meta.id];
+    if (exact != null) return exact;
+
+    // Custom providers: fall back to the built-in logo/model per type.
+    switch (meta.type) {
+      case AiProviderType.anthropic:
+        return _builtInById['claude'];
+      case AiProviderType.gemini:
+        return _builtInById['gemini'];
+      case AiProviderType.openaiResponses:
+        return _builtInById['openai-responses'];
+      case AiProviderType.openaiCompatible:
+        return _builtInById['openai'];
+    }
+  }
+
+  String _providerLogoKey(AiProviderMeta meta) {
+    return meta.logoKey ?? _builtInOptionForProvider(meta)?.logo ?? '';
+  }
+
+  String _modelLabel(String providerId) {
+    final stored = Prefs().getAiConfig(providerId);
+    final model = stored['model']?.trim();
+    if (model != null && model.isNotEmpty) {
+      return model;
+    }
+
+    final meta = _providerById(providerId);
+    final builtIn = meta == null
+        ? _builtInById[providerId]
+        : _builtInOptionForProvider(meta);
+
+    return builtIn?.defaultModel ?? '';
+  }
+
+  void _onProviderSelected(String providerId) {
+    if (_isStreaming || providerId == _selectedProviderId) return;
+    if (!_isProviderSelectable(providerId)) return;
+
+    Prefs().selectedAiService = providerId;
     setState(() {
-      _selectedServiceId = identifier;
+      _selectedProviderId = providerId;
     });
+  }
+
+  AiThinkingMode _thinkingModeForProvider(String providerId) {
+    final existing = Prefs().getAiConfig(providerId);
+    return aiThinkingModeFromString(existing['thinking_mode'] ?? 'off');
+  }
+
+  bool _includeThoughtsForProvider(AiProviderMeta provider) {
+    if (provider.type != AiProviderType.gemini) {
+      return false;
+    }
+    final existing = Prefs().getAiConfig(provider.id);
+    final raw = (existing['include_thoughts'] ?? 'true').trim().toLowerCase();
+    return raw != 'false' && raw != '0' && raw != 'no';
+  }
+
+  String _thinkingModeLabel(AiThinkingMode mode, L10n l10n) {
+    switch (mode) {
+      case AiThinkingMode.off:
+        return l10n.aiThinkingOff;
+      case AiThinkingMode.auto:
+        return l10n.aiThinkingAuto;
+      case AiThinkingMode.minimal:
+        return l10n.aiThinkingMinimal;
+      case AiThinkingMode.low:
+        return l10n.aiThinkingLow;
+      case AiThinkingMode.medium:
+        return l10n.aiThinkingMedium;
+      case AiThinkingMode.high:
+        return l10n.aiThinkingHigh;
+    }
+  }
+
+  List<AiThinkingMode> _supportedThinkingModes(AiProviderMeta provider) {
+    final stored = Prefs().getAiConfig(provider.id);
+    final model = (stored['model'] ?? '').trim().toLowerCase();
+
+    switch (provider.type) {
+      case AiProviderType.openaiCompatible:
+      case AiProviderType.openaiResponses:
+        return const [
+          AiThinkingMode.off,
+          AiThinkingMode.auto,
+          AiThinkingMode.minimal,
+          AiThinkingMode.low,
+          AiThinkingMode.medium,
+          AiThinkingMode.high,
+        ];
+      case AiProviderType.anthropic:
+        return const [
+          AiThinkingMode.off,
+          AiThinkingMode.auto,
+          AiThinkingMode.low,
+          AiThinkingMode.medium,
+          AiThinkingMode.high,
+        ];
+      case AiProviderType.gemini:
+        // Best-effort gating based on Gemini official doc.
+        if (model.contains('gemini-3-pro')) {
+          return const [
+            AiThinkingMode.auto,
+            AiThinkingMode.low,
+            AiThinkingMode.high,
+          ];
+        }
+        if (model.contains('gemini-2.5-pro')) {
+          // Doc says: cannot disable thinking.
+          return const [
+            AiThinkingMode.auto,
+            AiThinkingMode.low,
+            AiThinkingMode.medium,
+            AiThinkingMode.high,
+          ];
+        }
+        return const [
+          AiThinkingMode.off,
+          AiThinkingMode.auto,
+          AiThinkingMode.minimal,
+          AiThinkingMode.low,
+          AiThinkingMode.medium,
+          AiThinkingMode.high,
+        ];
+    }
+  }
+
+  IconData _thinkingIcon(AiThinkingMode mode) {
+    switch (mode) {
+      case AiThinkingMode.off:
+        return Icons.lightbulb_outline;
+      case AiThinkingMode.auto:
+        return Icons.auto_awesome;
+      case AiThinkingMode.minimal:
+        return Icons.lightbulb_outline;
+      case AiThinkingMode.low:
+        return Icons.lightbulb_outline;
+      case AiThinkingMode.medium:
+        return Icons.lightbulb;
+      case AiThinkingMode.high:
+        return Icons.lightbulb;
+    }
+  }
+
+  Future<void> _editThinkingMode() async {
+    if (_isStreaming) return;
+
+    final l10n = L10n.of(context);
+    final provider = _currentProvider;
+    final supported = _supportedThinkingModes(provider);
+
+    final current = _thinkingModeForProvider(provider.id);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) {
+        return SafeArea(
+          child: ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.all(12),
+            children: [
+              ListTile(
+                title: Text(l10n.aiThinkingTitle),
+                subtitle: Text(provider.name),
+              ),
+              if (provider.type == AiProviderType.gemini)
+                SwitchListTile.adaptive(
+                  title:
+                      Text(l10n.settingsAiProviderCenterIncludeThoughtsTitle),
+                  subtitle:
+                      Text(l10n.settingsAiProviderCenterIncludeThoughtsDesc),
+                  value: _includeThoughtsForProvider(provider),
+                  onChanged: (v) {
+                    final next = Map<String, String>.from(
+                      Prefs().getAiConfig(provider.id),
+                    );
+                    next['include_thoughts'] = v ? 'true' : 'false';
+                    Prefs().saveAiConfig(provider.id, next);
+                    setState(() {});
+                  },
+                ),
+              for (final mode in AiThinkingMode.values)
+                RadioListTile<AiThinkingMode>(
+                  value: mode,
+                  groupValue: current,
+                  title: Text(_thinkingModeLabel(mode, l10n)),
+                  secondary: Icon(_thinkingIcon(mode)),
+                  onChanged: supported.contains(mode)
+                      ? (v) {
+                          if (v == null) return;
+                          final next = Map<String, String>.from(
+                            Prefs().getAiConfig(provider.id),
+                          );
+                          next['thinking_mode'] = aiThinkingModeToString(v);
+                          Prefs().saveAiConfig(provider.id, next);
+                          setState(() {});
+                          Navigator.of(context).pop();
+                        }
+                      : null,
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _editCurrentModel() async {
+    if (_isStreaming) return;
+
+    final l10n = L10n.of(context);
+    final provider = _currentProvider;
+
+    final existing = Prefs().getAiConfig(provider.id);
+    final controller = TextEditingController(
+      text: (existing['model'] ?? '').trim(),
+    );
+
+    try {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          final cached = Prefs().getAiModelsCacheV1(provider.id)?.models ??
+              const <String>[];
+
+          return AlertDialog(
+            title: Text(l10n.aiChatEditModelTitle),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (cached.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    value: cached.contains(controller.text.trim())
+                        ? controller.text.trim()
+                        : null,
+                    decoration: InputDecoration(
+                      border: const OutlineInputBorder(),
+                      labelText: l10n.aiChatModelLabel,
+                    ),
+                    items: cached
+                        .map(
+                          (m) => DropdownMenuItem(
+                            value: m,
+                            child: Text(m, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(growable: false),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      controller.text = v;
+                    },
+                  )
+                else
+                  TextField(
+                    controller: controller,
+                    decoration: InputDecoration(
+                      border: const OutlineInputBorder(),
+                      labelText: l10n.aiChatModelLabel,
+                    ),
+                  ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.commonCancel),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.commonSave),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (ok != true || !mounted) return;
+
+      final nextModel = controller.text.trim();
+      final next = Map<String, String>.from(existing);
+      if (nextModel.isEmpty) {
+        next.remove('model');
+      } else {
+        next['model'] = nextModel;
+      }
+
+      Prefs().saveAiConfig(provider.id, next);
+      setState(() {});
+    } finally {
+      controller.dispose();
+    }
   }
 
   List<String> _pickSuggestedPrompts() {
@@ -153,14 +588,26 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     return prompts.take(3).toList(growable: false);
   }
 
-  void _scrollToBottom() {
+  void _scrollToBottom({bool force = false}) {
+    if (!force && !_pinnedToBottom) return;
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+      try {
+        if (_scrollController.hasClients) {
+          final target = _scrollController.position.maxScrollExtent;
+          // Use jumpTo during streaming to reduce jank.
+          if (_isStreaming) {
+            _scrollController.jumpTo(target);
+          } else {
+            _scrollController.animateTo(
+              target,
+              duration: const Duration(milliseconds: 250),
+              curve: Curves.easeOut,
+            );
+          }
+        }
+      } catch (_) {
+        // Ignore (e.g. controller disposed/replaced while minimizing).
       }
     });
   }
@@ -207,11 +654,12 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   }
 
   Widget _buildHistoryTile(BuildContext context, AiChatHistoryEntry entry) {
-    final option = _serviceOptionById(entry.serviceId);
+    final provider = _providerByIdFromPrefs(entry.serviceId) ??
+        _providerById(entry.serviceId);
     final statusColor =
         entry.completed ? Colors.green : Theme.of(context).colorScheme.tertiary;
     final title = _deriveTitle(entry);
-    final subtitle = _buildHistorySubtitle(option, entry);
+    final subtitle = _buildHistorySubtitle(provider, entry);
 
     return FilledContainer(
       margin: EdgeInsets.symmetric(horizontal: 8),
@@ -263,21 +711,18 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
   }
 
   String _buildHistorySubtitle(
-      AiServiceOption? option, AiChatHistoryEntry entry) {
-    final serviceLabel = option?.title ?? entry.serviceId;
+    AiProviderMeta? provider,
+    AiChatHistoryEntry entry,
+  ) {
+    final serviceLabel = provider?.name ?? entry.serviceId;
     if (entry.model.isEmpty) {
       return serviceLabel;
     }
     return '$serviceLabel · ${entry.model}';
   }
 
-  AiServiceOption? _serviceOptionById(String id) {
-    for (final option in _serviceOptions) {
-      if (option.identifier == id) {
-        return option;
-      }
-    }
-    return null;
+  AiProviderMeta? _providerByIdFromPrefs(String id) {
+    return Prefs().getAiProviderMeta(id);
   }
 
   String _deriveTitle(AiChatHistoryEntry entry) {
@@ -310,25 +755,14 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     AiChatHistoryEntry entry,
   ) async {
     if (_isStreaming) {
-      _cancelStreaming();
+      unawaited(ref.read(aiChatProvider.notifier).cancelStreaming());
     }
-    _messageSubscription?.cancel();
-    _messageSubscription = null;
-    final controller = _messageController;
-    if (controller != null && !controller.isClosed) {
-      await controller.close();
-    }
-    _messageController = null;
 
     ref.read(aiChatProvider.notifier).loadHistoryEntry(entry);
 
-    setState(() {
-      _messageStream = null;
-      // reset state when switching service
-    });
-
     Navigator.of(context).pop();
-    _scrollToBottom();
+    _pinnedToBottom = true;
+    _scrollToBottom(force: true);
   }
 
   Future<void> _confirmDeleteHistory(
@@ -340,22 +774,18 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     final currentSessionId = ref.read(aiChatProvider.notifier).currentSessionId;
     if (currentSessionId == entry.id) {
       ref.read(aiChatProvider.notifier).clear();
-      setState(() {
-        _messageStream = null;
-        // reset state when conversation changes
-      });
     }
   }
 
   Future<void> _confirmClearHistory(BuildContext context) async {
     await ref.read(aiHistoryProvider.notifier).clear();
     ref.read(aiChatProvider.notifier).clear();
-    setState(() {
-      _messageStream = null;
-    });
   }
 
-  void _sendMessage({bool isRegenerate = false}) {
+  // Streaming lifecycle is managed by [aiChatProvider] so UI minimize/close
+  // does not interrupt generation.
+
+  void _sendMessage() {
     if (_isStreaming) {
       return;
     }
@@ -364,50 +794,151 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     final message = inputController.text.trim();
     inputController.clear();
 
-    _messageSubscription?.cancel();
-    _messageController?.close();
+    _pinnedToBottom = true;
+    ref.read(aiChatProvider.notifier).startStreaming(message, false);
+    _scrollToBottom(force: true);
+  }
 
-    final controller = StreamController<List<ChatMessage>>();
-    final stream = ref.read(aiChatProvider.notifier).sendMessageStream(
-          message,
-          ref,
-          isRegenerate,
+  void _regenerateFromUserIndex(int userIndex) {
+    if (_isStreaming) {
+      return;
+    }
+
+    _pinnedToBottom = true;
+    ref.read(aiChatProvider.notifier).startStreaming(
+          '',
+          true,
+          regenerateFromUserIndex: userIndex,
         );
+    _scrollToBottom(force: true);
+  }
 
-    setState(() {
-      _messageController = controller;
-      _messageStream = controller.stream;
-      _isStreaming = true;
-    });
+  void _editUserMessageAndRegenerate(int userIndex, String newText) {
+    if (_isStreaming) {
+      return;
+    }
 
-    _messageSubscription = stream.listen(
-      (event) {
-        controller.add(event);
-        _scrollToBottom();
-      },
-      onError: (error, stack) {
-        controller.addError(error, stack);
-        if (!controller.isClosed) {
-          controller.close();
-        }
-        if (mounted) {
-          setState(() {
-            _isStreaming = false;
-          });
-        }
-      },
-      onDone: () {
-        if (!controller.isClosed) {
-          controller.close();
-        }
-        if (mounted) {
-          setState(() {
-            _isStreaming = false;
-          });
-        }
-      },
-      cancelOnError: false,
-    );
+    _pinnedToBottom = true;
+    ref.read(aiChatProvider.notifier).startStreaming(
+          newText,
+          true,
+          regenerateFromUserIndex: userIndex,
+          replaceUserMessage: true,
+        );
+    _scrollToBottom(force: true);
+  }
+
+  void _copyPlainText(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    AnxToast.show(L10n.of(context).notesPageCopied);
+  }
+
+  Future<void> _confirmRegenerateFromUserIndex(
+    int userIndex, {
+    required bool isLastTurn,
+  }) async {
+    if (_isStreaming) {
+      return;
+    }
+
+    if (!isLastTurn) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(L10n.of(context).aiChatRegenerateFromHereConfirmTitle),
+            content: Text(L10n.of(context).aiChatRegenerateFromHereConfirmBody),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(L10n.of(context).commonCancel),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(L10n.of(context).commonConfirm),
+              ),
+            ],
+          );
+        },
+      );
+      if (confirmed != true) {
+        return;
+      }
+    }
+
+    _regenerateFromUserIndex(userIndex);
+  }
+
+  Future<void> _showEditUserMessageDialog(
+    int userIndex,
+    String currentText,
+  ) async {
+    if (_isStreaming) {
+      return;
+    }
+
+    final controller = TextEditingController(text: currentText);
+    try {
+      final edited = await showDialog<String>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(L10n.of(context).aiChatEditUserMessageTitle),
+            content: TextField(
+              controller: controller,
+              maxLength: 20000,
+              maxLines: 6,
+              minLines: 1,
+              autofocus: true,
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(L10n.of(context).commonCancel),
+              ),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(context).pop(controller.text.trim());
+                },
+                child: Text(L10n.of(context).commonSave),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (edited == null) {
+        return;
+      }
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) {
+          return AlertDialog(
+            title: Text(L10n.of(context).aiChatRegenerateFromHereConfirmTitle),
+            content: Text(L10n.of(context).aiChatRegenerateFromHereConfirmBody),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(L10n.of(context).commonCancel),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(L10n.of(context).commonConfirm),
+              ),
+            ],
+          );
+        },
+      );
+
+      if (confirmed != true) {
+        return;
+      }
+
+      _editUserMessageAndRegenerate(userIndex, edited);
+    } finally {
+      controller.dispose();
+    }
   }
 
   void _useQuickPrompt(String prompt) {
@@ -419,13 +950,9 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     if (_isStreaming) {
       return;
     }
-    _messageSubscription?.cancel();
-    _messageSubscription = null;
-    _messageController?.close();
-    _messageController = null;
+
+    ref.read(aiChatProvider.notifier).clear();
     setState(() {
-      ref.read(aiChatProvider.notifier).clear();
-      _messageStream = null;
       _suggestedPrompts = _pickSuggestedPrompts();
     });
   }
@@ -442,12 +969,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     for (int i = messages.length - 1; i >= 0; i--) {
       final message = messages[i];
       if (message is HumanChatMessage) {
-        final history = messages.take(i).toList(growable: false);
-        ref.read(aiChatProvider.notifier).restore(history);
-        setState(() {
-          inputController.text = message.contentAsString;
-          _sendMessage(isRegenerate: true);
-        });
+        _regenerateFromUserIndex(i);
         break;
       }
     }
@@ -462,15 +984,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
 
   void _cancelStreaming() {
     if (!_isStreaming) return;
-    cancelActiveAiRequest();
-    _messageSubscription?.cancel();
-    _messageSubscription = null;
-    _messageController?.close();
-    _messageController = null;
-    setState(() {
-      _isStreaming = false;
-      _messageStream = null;
-    });
+    unawaited(ref.read(aiChatProvider.notifier).cancelStreaming());
   }
 
   ChatMessage? _getLastAssistantMessage() {
@@ -487,31 +1001,70 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     return null;
   }
 
+  void _ensureSelectedProviderValid() {
+    if (_isProviderSelectable(_selectedProviderId)) {
+      return;
+    }
+
+    final fallback = _fallbackProviderId(_providers);
+    if (fallback == _selectedProviderId) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_isProviderSelectable(fallback)) return;
+      Prefs().selectedAiService = fallback;
+      setState(() {
+        _selectedProviderId = fallback;
+      });
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final quickPrompts = _getQuickPrompts(context);
+    final chatIsStreaming = ref.watch(aiChatStreamingProvider);
+
+    // Refresh providers in case user toggled enable/disable in Provider Center.
+    _providers = Prefs().aiProvidersV1;
+    _ensureSelectedProviderValid();
+
+    final current = _currentProvider;
+    final currentModel = _modelLabel(_selectedProviderId);
 
     var aiService = PopupMenuButton<String>(
-      enabled: !_isStreaming,
-      onSelected: _onServiceSelected,
+      enabled: !chatIsStreaming,
+      onSelected: _onProviderSelected,
       itemBuilder: (context) {
-        return _serviceOptions.map((option) {
-          final isSelected = option.identifier == _selectedServiceId;
-          final label = _modelLabel(option.identifier);
+        final enabledProviders =
+            _providers.where((provider) => provider.enabled).toList();
+
+        return enabledProviders.map((provider) {
+          final isSelected = provider.id == _selectedProviderId;
+          final model = _modelLabel(provider.id);
+          final logoKey = _providerLogoKey(provider);
+
+          final label =
+              model.isEmpty ? provider.name : '${provider.name} · $model';
+
           return PopupMenuItem<String>(
-            value: option.identifier,
+            value: provider.id,
             child: Row(
               children: [
-                Image.asset(
-                  option.logo,
-                  width: 20,
-                  height: 20,
-                  errorBuilder: (_, __, ___) => const SizedBox(),
-                ),
+                if (logoKey.isNotEmpty)
+                  Image.asset(
+                    logoKey,
+                    width: 20,
+                    height: 20,
+                    errorBuilder: (_, __, ___) => const SizedBox(),
+                  )
+                else
+                  const SizedBox(width: 20, height: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${option.title} · $label',
+                    label,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -525,7 +1078,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Image.asset(
-            _currentService.logo,
+            _providerLogoKey(current),
             width: 20,
             height: 20,
             errorBuilder: (_, __, ___) => const SizedBox(),
@@ -533,7 +1086,9 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
           const SizedBox(width: 6),
           Flexible(
             child: Text(
-              '${_currentService.title} · ${_modelLabel(_selectedServiceId)}',
+              currentModel.isEmpty
+                  ? current.name
+                  : '${current.name} · $currentModel',
               style: Theme.of(context).textTheme.bodySmall,
               overflow: TextOverflow.ellipsis,
             ),
@@ -592,12 +1147,36 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                   child: Row(
                     children: [
                       Flexible(child: aiService),
+                      const SizedBox(width: 6),
+                      IconButton(
+                        icon: Icon(
+                          _thinkingIcon(
+                            _thinkingModeForProvider(_selectedProviderId),
+                          ),
+                          size: 18,
+                        ),
+                        tooltip: L10n.of(context).aiThinkingTitle,
+                        onPressed: _editThinkingMode,
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.tune, size: 18),
+                        tooltip: L10n.of(context).aiChatEditModelTitle,
+                        onPressed: _editCurrentModel,
+                      ),
                     ],
                   ),
                 ),
+                if (widget.onRequestMinimize != null)
+                  IconButton(
+                    icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+                    onPressed: widget.onRequestMinimize,
+                  ),
                 IconButton(
-                  icon: Icon(_isStreaming ? Icons.stop : Icons.send, size: 18),
-                  onPressed: _isStreaming ? _cancelStreaming : _sendMessage,
+                  icon: Icon(
+                    chatIsStreaming ? Icons.stop : Icons.send,
+                    size: 18,
+                  ),
+                  onPressed: chatIsStreaming ? _cancelStreaming : _sendMessage,
                 ),
               ],
             ),
@@ -605,6 +1184,29 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
         ),
       ),
     );
+
+    if (widget.onRequestMinimize != null) {
+      inputBox = GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragStart: (_) {
+          _inputSwipeDownDy = 0;
+        },
+        onVerticalDragUpdate: (details) {
+          final delta = details.primaryDelta ?? 0;
+          if (delta > 0) {
+            _inputSwipeDownDy += delta;
+          }
+        },
+        onVerticalDragEnd: (_) {
+          if (_inputSwipeDownDy > 24) {
+            HapticFeedback.selectionClick();
+            widget.onRequestMinimize?.call();
+          }
+          _inputSwipeDownDy = 0;
+        },
+        child: inputBox,
+      );
+    }
 
     Widget buildEmptyState() {
       final theme = Theme.of(context);
@@ -638,7 +1240,6 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
           child: SizedBox(
             height: MediaQuery.of(context).size.height * 0.3,
             child: SingleChildScrollView(
-              // scrollDirection: Axis.horizontal,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: chips,
@@ -648,7 +1249,7 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
         );
       }
 
-      return Stack(
+      final content = Stack(
         children: [
           if (widget.quickPromptChips.isEmpty)
             Center(
@@ -682,7 +1283,25 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
           buildQuickChipColumn(),
         ],
       );
+
+      // IMPORTANT:
+      // When used inside DraggableScrollableSheet, we must always attach the
+      // provided ScrollController to a ScrollView; otherwise the sheet
+      // controller won't be attached and programmatic minimize won't work.
+      return ListView(
+        controller: _scrollController,
+        padding: EdgeInsets.zero,
+        physics: const ClampingScrollPhysics(),
+        children: [
+          SizedBox(
+            height: MediaQuery.of(context).size.height * 0.6,
+            child: content,
+          ),
+        ],
+      );
     }
+
+    final fontScale = Prefs().aiChatFontScale.clamp(0.8, 1.4).toDouble();
 
     return Scaffold(
       key: _scaffoldKey,
@@ -696,6 +1315,11 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
         ),
         actions: [
           IconButton(
+            icon: const Icon(Icons.text_fields),
+            tooltip: L10n.of(context).font,
+            onPressed: _showFontScaleSheet,
+          ),
+          IconButton(
             icon: const Icon(Icons.edit_document),
             onPressed: _clearMessage,
           ),
@@ -705,67 +1329,185 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
       drawer: Drawer(
         child: _buildHistoryDrawer(context),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: _messageStream != null
-                ? StreamBuilder<List<ChatMessage>>(
-                    stream: _messageStream,
-                    builder: (context, snapshot) {
-                      if (!snapshot.hasData) {
-                        return Skeletonizer.zone(child: Bone.multiText());
-                      }
-
-                      final messages = snapshot.data!;
+      body: MediaQuery(
+        data: MediaQuery.of(context).copyWith(
+          textScaler: TextScaler.linear(fontScale),
+        ),
+        child: Column(
+          children: [
+            Expanded(
+              child: ref.watch(aiChatProvider).when(
+                    data: (messages) {
                       if (messages.isEmpty) {
                         return buildEmptyState();
                       }
 
                       return _buildMessageList(messages);
                     },
-                  )
-                : ref.watch(aiChatProvider).when(
-                      data: (messages) {
-                        if (messages.isEmpty) {
-                          return buildEmptyState();
-                        }
-
-                        return _buildMessageList(messages);
-                      },
-                      loading: () => Skeletonizer.zone(child: Bone.multiText()),
-                      error: (error, stack) =>
-                          Center(child: Text('error: $error')),
-                    ),
-          ),
-          inputBox,
-        ],
+                    loading: () => Skeletonizer.zone(child: Bone.multiText()),
+                    error: (error, stack) =>
+                        Center(child: Text('error: $error')),
+                  ),
+            ),
+            inputBox,
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildMessageList(List<ChatMessage> messages) {
+    final lastHumanIndex = _findLastHumanIndex(messages);
+    final isStreaming = ref.watch(aiChatStreamingProvider);
+
     return ListView.builder(
       controller: _scrollController,
       itemCount: messages.length,
       itemBuilder: (context, index) {
         final message = messages[index];
-        final isStreaming =
-            _messageStream != null && index == messages.length - 1;
-        return _buildMessageItem(message, index, isStreaming);
+        final isLastMessage = index == messages.length - 1;
+        return _buildLinearMessageItem(
+          messages,
+          message,
+          index,
+          isStreaming && isLastMessage,
+          lastHumanIndex: lastHumanIndex,
+        );
       },
     );
   }
 
-  Widget _buildMessageItem(
-    ChatMessage message,
-    int index,
+  List<_ChatItem> _buildChatItems(List<ChatMessage> messages) {
+    final items = <_ChatItem>[];
+    var i = 0;
+    while (i < messages.length) {
+      final message = messages[i];
+      if (message is HumanChatMessage) {
+        items.add(_UserChatItem(index: i, message: message));
+
+        final variants = <AIChatMessage>[];
+        var j = i + 1;
+        while (j < messages.length && messages[j] is AIChatMessage) {
+          variants.add(messages[j] as AIChatMessage);
+          j++;
+        }
+        if (variants.isNotEmpty) {
+          items.add(
+            _AssistantGroupChatItem(
+              groupKey: i,
+              userIndex: i,
+              variants: variants,
+            ),
+          );
+        }
+        i = j;
+        continue;
+      }
+
+      if (message is AIChatMessage) {
+        // Orphan assistant messages (should be rare). Group them to keep the UI
+        // consistent.
+        final variants = <AIChatMessage>[];
+        var j = i;
+        while (j < messages.length && messages[j] is AIChatMessage) {
+          variants.add(messages[j] as AIChatMessage);
+          j++;
+        }
+        items.add(
+          _AssistantGroupChatItem(
+            groupKey: -(i + 1),
+            userIndex: null,
+            variants: variants,
+          ),
+        );
+        i = j;
+        continue;
+      }
+
+      i++;
+    }
+
+    return items;
+  }
+
+  int? _findLastHumanIndex(List<ChatMessage> messages) {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i] is HumanChatMessage) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  int? _findPrevHumanIndex(List<ChatMessage> messages, int fromIndex) {
+    for (var i = fromIndex; i >= 0; i--) {
+      if (messages[i] is HumanChatMessage) {
+        return i;
+      }
+    }
+    return null;
+  }
+
+  Widget _buildVariantSwitcher(
+    int messageIndex,
     bool isStreaming,
   ) {
+    final notifier = ref.read(aiChatProvider.notifier);
+    final count = notifier.variantCountForMessageIndex(messageIndex);
+    if (count <= 1) {
+      return const SizedBox.shrink();
+    }
+
+    final selected = notifier.selectedVariantIndexForMessageIndex(messageIndex);
+    final canNavigate = !_isStreaming && !isStreaming;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          icon: const Icon(Icons.chevron_left, size: 18),
+          onPressed: canNavigate && selected > 0
+              ? () {
+                  notifier.switchVariantAtMessageIndexAndPersist(
+                    messageIndex,
+                    -1,
+                    ref,
+                  );
+                }
+              : null,
+        ),
+        Text('${selected + 1}/$count'),
+        IconButton(
+          icon: const Icon(Icons.chevron_right, size: 18),
+          onPressed: canNavigate && selected < count - 1
+              ? () {
+                  notifier.switchVariantAtMessageIndexAndPersist(
+                    messageIndex,
+                    1,
+                    ref,
+                  );
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLinearMessageItem(
+    List<ChatMessage> allMessages,
+    ChatMessage message,
+    int index,
+    bool isStreaming, {
+    required int? lastHumanIndex,
+  }) {
     final isUser = message is HumanChatMessage;
     final content = message.contentAsString;
-    final parsed = parseReasoningContent(content);
     final isLongMessage = content.length > 300;
-    final lastAssistantMessage = _getLastAssistantMessage();
+
+    final prevHumanIndex =
+        isUser ? index : _findPrevHumanIndex(allMessages, index);
+    final isLastTurn =
+        prevHumanIndex != null && prevHumanIndex == lastHumanIndex;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -798,14 +1540,31 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                 children: [
                   isUser
                       ? _buildCollapsibleText(content, isLongMessage)
-                      : _buildAssistantTimeline(parsed, isStreaming),
-                  if (!isUser)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        if (identical(message, lastAssistantMessage))
+                      : _buildAssistantSections(content, isStreaming),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      _buildVariantSwitcher(index, isStreaming),
+                      const SizedBox(width: 4),
+                      if (isUser) ...[
+                        TextButton(
+                          onPressed: () => _showEditUserMessageDialog(
+                            index,
+                            content,
+                          ),
+                          child: Text(L10n.of(context).commonEdit),
+                        ),
+                        TextButton(
+                          onPressed: () => _copyPlainText(content),
+                          child: Text(L10n.of(context).commonCopy),
+                        ),
+                      ] else ...[
+                        if (prevHumanIndex != null)
                           TextButton(
-                            onPressed: _regenerateLastMessage,
+                            onPressed: () => _confirmRegenerateFromUserIndex(
+                              prevHumanIndex,
+                              isLastTurn: isLastTurn,
+                            ),
                             child: Text(L10n.of(context).aiRegenerate),
                           ),
                         TextButton(
@@ -813,7 +1572,161 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
                           child: Text(L10n.of(context).commonCopy),
                         ),
                       ],
-                    ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUserMessageItem(_UserChatItem item) {
+    final content = item.message.contentAsString;
+    final isLongMessage = content.length > 300;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0, left: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainer,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(12),
+                  topRight: Radius.zero,
+                  bottomLeft: Radius.zero,
+                  bottomRight: Radius.circular(12),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildCollapsibleText(content, isLongMessage),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => _showEditUserMessageDialog(
+                          item.index,
+                          content,
+                        ),
+                        child: Text(L10n.of(context).commonEdit),
+                      ),
+                      TextButton(
+                        onPressed: () => _copyPlainText(content),
+                        child: Text(L10n.of(context).commonCopy),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAssistantGroupItem(
+    _AssistantGroupChatItem item, {
+    required int? lastHumanIndex,
+    required ChatMessage? lastMessage,
+  }) {
+    var selected = _selectedVariantByUserIndex[item.groupKey] ??
+        (item.variants.length - 1);
+    if (selected < 0) selected = 0;
+    if (selected >= item.variants.length) selected = item.variants.length - 1;
+
+    final message = item.variants[selected];
+    final content = message.contentAsString;
+    final isStreaming =
+        ref.watch(aiChatStreamingProvider) && identical(lastMessage, message);
+
+    final canNavigateVariants =
+        item.variants.length > 1 && !_isStreaming && !isStreaming;
+
+    final isLastTurn =
+        item.userIndex != null && item.userIndex == lastHumanIndex;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8.0, right: 8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SizedBox(width: 8),
+          Flexible(
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surface,
+                borderRadius: const BorderRadius.only(
+                  topRight: Radius.circular(12),
+                  bottomLeft: Radius.circular(12),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildAssistantSections(content, isStreaming),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      if (item.variants.length > 1)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.chevron_left, size: 18),
+                              onPressed: canNavigateVariants && selected > 0
+                                  ? () {
+                                      setState(() {
+                                        _selectedVariantByUserIndex[
+                                            item.groupKey] = selected - 1;
+                                      });
+                                    }
+                                  : null,
+                            ),
+                            Text('${selected + 1}/${item.variants.length}'),
+                            IconButton(
+                              icon: const Icon(Icons.chevron_right, size: 18),
+                              onPressed: canNavigateVariants &&
+                                      selected < item.variants.length - 1
+                                  ? () {
+                                      setState(() {
+                                        _selectedVariantByUserIndex[
+                                            item.groupKey] = selected + 1;
+                                      });
+                                    }
+                                  : null,
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                        ),
+                      if (item.userIndex != null)
+                        TextButton(
+                          onPressed: () => _confirmRegenerateFromUserIndex(
+                            item.userIndex!,
+                            isLastTurn: isLastTurn,
+                          ),
+                          child: Text(L10n.of(context).aiRegenerate),
+                        ),
+                      TextButton(
+                        onPressed: () => _copyMessageContent(content),
+                        child: Text(L10n.of(context).commonCopy),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -872,42 +1785,99 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     return copyText;
   }
 
-  Widget _buildAssistantTimeline(ParsedReasoning parsed, bool isStreaming) {
-    if (parsed.timeline.isEmpty) {
-      return isStreaming
-          ? Skeletonizer.zone(child: Bone.multiText())
-          : const SizedBox.shrink();
+  Widget _buildAssistantSections(String content, bool isStreaming) {
+    // Extract the <think>...</think> summary (if any), then parse the rest for
+    // answer text + tool steps.
+    final thinkRegex = RegExp(r'<think>([\s\S]*?)<\/think>');
+    final matches = thinkRegex.allMatches(content).toList(growable: false);
+
+    final thinking = matches
+        .map((m) => m.group(1))
+        .whereType<String>()
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .join('\n')
+        .trim();
+
+    final remaining = content.replaceAll(thinkRegex, '').trim();
+    final parsed = parseReasoningContent(remaining);
+
+    final answerText = parsed.timeline
+        .where((e) => e.type == ParsedReasoningEntryType.reply)
+        .map((e) => e.text ?? '')
+        .join('')
+        .trim();
+
+    final toolSteps = parsed.toolSteps;
+
+    final l10n = L10n.of(context);
+
+    final children = <Widget>[];
+
+    if (answerText.isEmpty) {
+      children.add(
+        isStreaming
+            ? Skeletonizer.zone(child: Bone.multiText())
+            : const SizedBox.shrink(),
+      );
+    } else {
+      children.add(
+        StyledMarkdown(
+          data: answerText,
+          selectable: true,
+        ),
+      );
     }
 
-    final widgets = <Widget>[];
-    for (var i = 0; i < parsed.timeline.length; i++) {
-      final entry = parsed.timeline[i];
-      switch (entry.type) {
-        case ParsedReasoningEntryType.reply:
-          if (entry.text != null && entry.text!.trim().isNotEmpty) {
-            widgets.add(
+    if (thinking.isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(top: 6),
+            title: Text(
+              l10n.aiSectionThinking,
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            children: [
               StyledMarkdown(
-                data: entry.text!,
+                data: thinking,
                 selectable: true,
               ),
-            );
-          }
-          break;
-        case ParsedReasoningEntryType.tool:
-          if (entry.toolStep != null) {
-            widgets.add(_buildToolTile(entry.toolStep!));
-          }
-          break;
-      }
+            ],
+          ),
+        ),
+      );
+    }
 
-      if (i != parsed.timeline.length - 1) {
-        widgets.add(const SizedBox(height: 8));
-      }
+    if (toolSteps.isNotEmpty) {
+      children.add(const SizedBox(height: 8));
+      children.add(
+        Theme(
+          data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            childrenPadding: const EdgeInsets.only(top: 6),
+            title: Text(
+              l10n.aiSectionTools,
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            children: [
+              for (var i = 0; i < toolSteps.length; i++) ...[
+                _buildToolTile(toolSteps[i]),
+                if (i != toolSteps.length - 1) const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+      );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: widgets,
+      children: children,
     );
   }
 
@@ -924,6 +1894,78 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
     return ToolStepTile(step: step);
   }
 
+  void _showFontScaleSheet() {
+    final l10n = L10n.of(context);
+    const minScale = 0.8;
+    const maxScale = 1.4;
+
+    // Use a dialog instead of a bottom sheet.
+    //
+    // The AI chat itself can be hosted inside a bottom sheet (iPhone/iPad sheet
+    // mode). Stacking a sheet-on-sheet may auto-dismiss on some platforms.
+    showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        double scale = Prefs().aiChatFontScale.clamp(minScale, maxScale);
+
+        return AlertDialog(
+          title: Text(l10n.font),
+          content: StatefulBuilder(
+            builder: (context, setModalState) {
+              void update(double next) {
+                final clamped = next.clamp(minScale, maxScale).toDouble();
+                setModalState(() {
+                  scale = clamped;
+                });
+                Prefs().aiChatFontScale = clamped;
+                // Force rebuild to apply scale immediately.
+                setState(() {});
+              }
+
+              return SizedBox(
+                width: 320,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '${(scale * 100).round()}%',
+                            style: Theme.of(context).textTheme.bodyMedium,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => update(1.0),
+                          child: Text(l10n.commonReset),
+                        ),
+                      ],
+                    ),
+                    Slider(
+                      value: scale,
+                      min: minScale,
+                      max: maxScale,
+                      divisions: 12,
+                      label: '${(scale * 100).round()}%',
+                      onChanged: update,
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(l10n.commonOk),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildCollapsibleText(String text, bool isLongMessage) {
     if (!isLongMessage) {
       return SelectableText(
@@ -934,6 +1976,41 @@ class AiChatStreamState extends ConsumerState<AiChatStream> {
 
     return _CollapsibleText(text: text);
   }
+}
+
+abstract class _ChatItem {
+  const _ChatItem();
+}
+
+class _UserChatItem extends _ChatItem {
+  const _UserChatItem({
+    required this.index,
+    required this.message,
+  });
+
+  final int index;
+  final HumanChatMessage message;
+}
+
+class _AssistantGroupChatItem extends _ChatItem {
+  const _AssistantGroupChatItem({
+    required this.groupKey,
+    required this.userIndex,
+    required this.variants,
+  });
+
+  /// Stable within the current in-memory message list.
+  ///
+  /// - For normal turns: equals [userIndex].
+  /// - For orphan assistant groups: negative.
+  final int groupKey;
+
+  /// The index of the user message this assistant group belongs to.
+  ///
+  /// If null, this is an orphan assistant group.
+  final int? userIndex;
+
+  final List<AIChatMessage> variants;
 }
 
 class _CollapsibleText extends StatefulWidget {

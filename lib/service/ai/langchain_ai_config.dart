@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:anx_reader/enums/ai_thinking_mode.dart';
 import 'package:langchain_anthropic/langchain_anthropic.dart';
 import 'package:langchain_google/langchain_google.dart';
 import 'package:langchain_openai/langchain_openai.dart';
@@ -16,6 +17,8 @@ class LangchainAiConfig {
     this.topP,
     this.maxTokens,
     this.maxOutputTokens,
+    this.thinkingMode = AiThinkingMode.off,
+    this.includeThoughts = false,
     this.additional,
   }) : headers = Map.unmodifiable(headers ?? const {});
 
@@ -28,11 +31,41 @@ class LangchainAiConfig {
   final double? topP;
   final int? maxTokens;
   final int? maxOutputTokens;
+
+  /// Cherry-style thinking level.
+  final AiThinkingMode thinkingMode;
+
+  /// Gemini thought summary toggle.
+  final bool includeThoughts;
+
   final Map<String, dynamic>? additional;
 
   ChatOpenAIOptions toOpenAIOptions() {
+    ChatOpenAIReasoningEffort? effort;
+    switch (thinkingMode) {
+      case AiThinkingMode.off:
+        effort = null;
+        break;
+      case AiThinkingMode.auto:
+        effort = null;
+        break;
+      case AiThinkingMode.minimal:
+        effort = ChatOpenAIReasoningEffort.minimal;
+        break;
+      case AiThinkingMode.low:
+        effort = ChatOpenAIReasoningEffort.low;
+        break;
+      case AiThinkingMode.medium:
+        effort = ChatOpenAIReasoningEffort.medium;
+        break;
+      case AiThinkingMode.high:
+        effort = ChatOpenAIReasoningEffort.high;
+        break;
+    }
+
     return ChatOpenAIOptions(
       model: model.isEmpty ? null : model,
+      reasoningEffort: effort,
       temperature: temperature,
       topP: topP,
       maxTokens: maxTokens,
@@ -40,11 +73,37 @@ class LangchainAiConfig {
   }
 
   ChatAnthropicOptions toAnthropicOptions() {
+    ChatAnthropicThinking? thinking;
+
+    // Anthropic thinking is opt-in. We map Cherry-style thinkingMode into
+    // Claude extended thinking budget.
+    switch (thinkingMode) {
+      case AiThinkingMode.off:
+        thinking = ChatAnthropicThinking.disabled();
+        break;
+      case AiThinkingMode.auto:
+        thinking = ChatAnthropicThinking.enabled(budgetTokens: 4096);
+        break;
+      case AiThinkingMode.minimal:
+        thinking = ChatAnthropicThinking.enabled(budgetTokens: 1024);
+        break;
+      case AiThinkingMode.low:
+        thinking = ChatAnthropicThinking.enabled(budgetTokens: 2048);
+        break;
+      case AiThinkingMode.medium:
+        thinking = ChatAnthropicThinking.enabled(budgetTokens: 4096);
+        break;
+      case AiThinkingMode.high:
+        thinking = ChatAnthropicThinking.enabled(budgetTokens: 8192);
+        break;
+    }
+
     return ChatAnthropicOptions(
       model: model.isEmpty ? null : model,
       temperature: temperature,
       topP: topP,
       maxTokens: maxTokens,
+      thinking: thinking,
     );
   }
 
@@ -72,6 +131,14 @@ class LangchainAiConfig {
     int? parseInt(String? value) =>
         value == null ? null : int.tryParse(value.trim());
 
+    final thinkingMode =
+        aiThinkingModeFromString(raw['thinking_mode'] ?? 'off');
+    final includeThoughtsRaw =
+        (raw['include_thoughts'] ?? 'false').trim().toLowerCase();
+    final includeThoughts = includeThoughtsRaw == 'true' ||
+        includeThoughtsRaw == '1' ||
+        includeThoughtsRaw == 'yes';
+
     return LangchainAiConfig(
       identifier: identifier,
       apiKey: apiKey,
@@ -82,6 +149,8 @@ class LangchainAiConfig {
       topP: parseDouble(raw['top_p']),
       maxTokens: parseInt(raw['max_tokens']),
       maxOutputTokens: parseInt(raw['max_output_tokens']),
+      thinkingMode: thinkingMode,
+      includeThoughts: includeThoughts,
       additional: additional,
     );
   }
@@ -95,6 +164,8 @@ class LangchainAiConfig {
     double? topP,
     int? maxTokens,
     int? maxOutputTokens,
+    AiThinkingMode? thinkingMode,
+    bool? includeThoughts,
     Map<String, dynamic>? additional,
   }) {
     return LangchainAiConfig(
@@ -107,6 +178,8 @@ class LangchainAiConfig {
       topP: topP ?? this.topP,
       maxTokens: maxTokens ?? this.maxTokens,
       maxOutputTokens: maxOutputTokens ?? this.maxOutputTokens,
+      thinkingMode: thinkingMode ?? this.thinkingMode,
+      includeThoughts: includeThoughts ?? this.includeThoughts,
       additional: additional ?? this.additional,
     );
   }

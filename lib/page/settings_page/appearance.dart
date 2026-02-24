@@ -1,6 +1,6 @@
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
-import 'package:anx_reader/utils/env_var.dart';
+import 'package:anx_reader/page/settings_page/home_navigation.dart';
 import 'package:anx_reader/widgets/common/anx_segmented_button.dart';
 import 'package:anx_reader/widgets/settings/settings_title.dart';
 import 'package:anx_reader/widgets/settings/simple_dialog.dart';
@@ -226,32 +226,18 @@ class _AppearanceSettingState extends State<AppearanceSetting> {
         SettingsSection(
           title: Text(L10n.of(context).settingsAppearanceBottomNavigatorShow),
           tiles: [
-            if (EnvVar.enableAIFeature)
-              SettingsTile.switchTile(
-                title: Text(L10n.of(context).navBarAI),
-                initialValue: Prefs().bottomNavigatorShowAI,
-                onToggle: (bool value) {
-                  setState(() {
-                    Prefs().bottomNavigatorShowAI = value;
-                  });
-                },
-              ),
-            SettingsTile.switchTile(
-              title: Text(L10n.of(context).navBarStatistics),
-              initialValue: Prefs().bottomNavigatorShowStatistics,
-              onToggle: (bool value) {
-                setState(() {
-                  Prefs().bottomNavigatorShowStatistics = value;
-                });
-              },
-            ),
-            SettingsTile.switchTile(
-              title: Text(L10n.of(context).navBarNotes),
-              initialValue: Prefs().bottomNavigatorShowNote,
-              onToggle: (bool value) {
-                setState(() {
-                  Prefs().bottomNavigatorShowNote = value;
-                });
+            SettingsTile.navigation(
+              title: Text(L10n.of(context).settingsHomeNavigation),
+              description:
+                  Text(L10n.of(context).settingsHomeNavigationSubtitle),
+              leading: const Icon(Icons.view_week_outlined),
+              onPressed: (context) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const HomeNavigationSettingsPage(),
+                  ),
+                );
               },
             ),
           ],

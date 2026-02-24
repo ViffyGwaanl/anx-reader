@@ -31,8 +31,11 @@ import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:path/path.dart' as path;
 import 'package:anx_reader/widgets/settings/settings_section.dart';
 import 'package:anx_reader/widgets/settings/settings_tile.dart';
+import 'package:anx_reader/service/ai/ai_services.dart';
+import 'package:anx_reader/utils/crypto/backup_crypto.dart';
 
 const String _prefsBackupFileName = 'anx_shared_prefs.json';
+const String _backupManifestFileName = 'manifest.json';
 
 class SyncSetting extends ConsumerStatefulWidget {
   const SyncSetting({super.key});
@@ -132,7 +135,7 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
                 title: Text(L10n.of(context).exportAndImportExport),
                 leading: const Icon(Icons.cloud_upload),
                 onPressed: (context) {
-                  exportData(context);
+                  _showExportBackupDialog(context);
                 }),
             SettingsTile.navigation(
                 title: Text(L10n.of(context).exportAndImportImport),
@@ -161,7 +164,105 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
     });
   }
 
-  Future<void> exportData(BuildContext context) async {
+  Future<void> _showExportBackupDialog(BuildContext context) async {
+    final l10n = L10n.of(context);
+
+    bool includeEncryptedApiKeys = false;
+    final passwordController = TextEditingController();
+    final confirmController = TextEditingController();
+
+    final confirmed = await SmartDialog.show<bool>(
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setState) {
+            return AlertDialog(
+              title: Text(l10n.exportAndImportExport),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SwitchListTile(
+                      title: Text(l10n.backupIncludeApiKeyEncrypted),
+                      value: includeEncryptedApiKeys,
+                      onChanged: (value) {
+                        setState(() {
+                          includeEncryptedApiKeys = value;
+                        });
+                      },
+                    ),
+                    if (includeEncryptedApiKeys) ...[
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: passwordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: l10n.backupPassword,
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: confirmController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: l10n.backupPasswordConfirm,
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        l10n.backupPasswordTip,
+                        style: Theme.of(ctx).textTheme.bodySmall,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => SmartDialog.dismiss(result: false),
+                  child: Text(l10n.commonCancel),
+                ),
+                TextButton(
+                  onPressed: () {
+                    if (includeEncryptedApiKeys) {
+                      final p1 = passwordController.text;
+                      final p2 = confirmController.text;
+                      if (p1.isEmpty || p1 != p2) {
+                        AnxToast.show(l10n.backupPasswordMismatch);
+                        return;
+                      }
+                    }
+                    SmartDialog.dismiss(result: true);
+                  },
+                  child: Text(l10n.commonConfirm),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed != true) {
+      passwordController.dispose();
+      confirmController.dispose();
+      return;
+    }
+
+    final password = includeEncryptedApiKeys ? passwordController.text : null;
+    passwordController.dispose();
+    confirmController.dispose();
+
+    await exportData(
+      context,
+      includeEncryptedApiKeys: includeEncryptedApiKeys,
+      password: password,
+    );
+  }
+
+  Future<void> exportData(BuildContext context,
+      {bool includeEncryptedApiKeys = false, String? password}) async {
     AnxLog.info('exportData: start');
     if (!mounted) return;
 
@@ -169,10 +270,48 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
 
     final File prefsBackupFile = await _createPrefsBackupFile();
 
+    final tempDir = await getAnxTempDir();
+    final manifestPath = '${tempDir.path}/$_backupManifestFileName';
+
+    Map<String, dynamic> manifest = {
+      'schemaVersion': 4,
+      'createdAt': DateTime.now().millisecondsSinceEpoch,
+      'containsEncryptedApiKeys': false,
+    };
+
+    if (includeEncryptedApiKeys) {
+      try {
+        final apiKeys = <String, String>{};
+        for (final option in buildDefaultAiServices()) {
+          final cfg = Prefs().getAiConfig(option.identifier);
+          final key = (cfg['api_key'] ?? '').trim();
+          if (key.isEmpty || key == 'YOUR_API_KEY') continue;
+          apiKeys[option.identifier] = key;
+        }
+
+        final plaintext = jsonEncode(apiKeys);
+        final secret = await encryptString(
+          plaintext: plaintext,
+          password: password ?? '',
+        );
+
+        manifest['containsEncryptedApiKeys'] = true;
+        manifest['encryptedApiKeys'] = secret.toJson();
+      } catch (e) {
+        SmartDialog.dismiss();
+        AnxToast.show(L10n.of(context).backupEncryptFailed);
+        AnxLog.info('exportData: failed to encrypt api keys: $e');
+        return;
+      }
+    }
+
+    await File(manifestPath).writeAsString(jsonEncode(manifest));
+
     RootIsolateToken token = RootIsolateToken.instance!;
     final zipPath = await compute(createZipFile, {
       'token': token,
       'prefsBackupFilePath': prefsBackupFile.path,
+      'manifestFilePath': manifestPath,
     });
 
     final file = File(zipPath);
@@ -184,7 +323,7 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
       // );
       // final filePath = await FlutterFileDialog.saveFile(params: params);
       String fileName =
-          'AnxReader-Backup-${DateTime.now().year}-${DateTime.now().month}-${DateTime.now().day}-v3.zip';
+          'AnxReader-Backup-${DateTime.now().year}-${DateTime.now().month}-${DateTime.now().day}-v4.zip';
 
       String? filePath = await saveFileToDownload(
           sourceFilePath: file.path,
@@ -203,9 +342,106 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
     }
   }
 
+  Future<Map<String, String>?> _loadEncryptedApiKeysFromBackup(
+      String extractPath) async {
+    final l10n = L10n.of(navigatorKey.currentContext!);
+    final manifestFile = File('$extractPath/$_backupManifestFileName');
+    if (!await manifestFile.exists()) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(await manifestFile.readAsString());
+      if (decoded is! Map) return null;
+      final map = decoded.cast<String, dynamic>();
+      final contains = map['containsEncryptedApiKeys'] == true;
+      if (!contains) return null;
+      final secretRaw = map['encryptedApiKeys'];
+      if (secretRaw is! Map) return null;
+
+      final secret =
+          EncryptedBackupSecret.fromJson(secretRaw.cast<String, dynamic>());
+
+      final passwordController = TextEditingController();
+      final ok = await SmartDialog.show<bool>(
+        builder: (ctx) => AlertDialog(
+          title: Text(l10n.backupPassword),
+          content: TextField(
+            controller: passwordController,
+            obscureText: true,
+            decoration: InputDecoration(
+              border: const OutlineInputBorder(),
+              hintText: l10n.backupPasswordHint,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => SmartDialog.dismiss(result: false),
+              child: Text(l10n.commonCancel),
+            ),
+            TextButton(
+              onPressed: () => SmartDialog.dismiss(result: true),
+              child: Text(l10n.commonConfirm),
+            ),
+          ],
+        ),
+      );
+
+      final password = passwordController.text;
+      passwordController.dispose();
+
+      if (ok != true || password.isEmpty) {
+        return null;
+      }
+
+      final plaintext = await decryptString(secret: secret, password: password);
+      final keysDecoded = jsonDecode(plaintext);
+      if (keysDecoded is! Map) return null;
+
+      return keysDecoded.map((k, v) => MapEntry(k.toString(), v.toString()));
+    } catch (e) {
+      AnxLog.info('importData: failed to decrypt api keys: $e');
+      AnxToast.show(l10n.backupDecryptFailed);
+      return null;
+    }
+  }
+
+  void _applyApiKeysToPrefs(Map<String, String> apiKeys) {
+    for (final entry in apiKeys.entries) {
+      final id = entry.key;
+      final apiKey = entry.value.trim();
+      if (apiKey.isEmpty) continue;
+      final cfg = Prefs().getAiConfig(id);
+      cfg['api_key'] = apiKey;
+      Prefs().saveAiConfig(id, cfg);
+    }
+  }
+
   Future<void> importData() async {
     AnxLog.info('importData: start');
     if (!mounted) return;
+
+    final l10n = L10n.of(navigatorKey.currentContext!);
+    final confirmed = await SmartDialog.show<bool>(
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n.backupImportConfirmTitle),
+        content: Text(l10n.backupImportConfirmBody),
+        actions: [
+          TextButton(
+            onPressed: () => SmartDialog.dismiss(result: false),
+            child: Text(l10n.commonCancel),
+          ),
+          TextButton(
+            onPressed: () => SmartDialog.dismiss(result: true),
+            child: Text(l10n.commonConfirm),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      return;
+    }
 
     FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -231,6 +467,9 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
           L10n.of(navigatorKey.currentContext!).importCannotGetFilePath);
       return;
     }
+
+    // Import confirmation handled before file picking.
+
     _showDataDialog(L10n.of(navigatorKey.currentContext!).importing);
 
     String pathSeparator = Platform.pathSeparator;
@@ -247,26 +486,85 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
         'destinationPath': extractPath,
       });
 
+      final decryptedApiKeys =
+          await _loadEncryptedApiKeysFromBackup(extractPath);
+
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final bakSuffix = '.bak.$ts';
+
       String docPath = await getAnxDocumentsPath();
-      _copyDirectorySync(Directory('$extractPath${pathSeparator}file'),
-          getFileDir(path: docPath));
-      _copyDirectorySync(Directory('$extractPath${pathSeparator}cover'),
-          getCoverDir(path: docPath));
-      _copyDirectorySync(Directory('$extractPath${pathSeparator}font'),
-          getFontDir(path: docPath));
-      _copyDirectorySync(Directory('$extractPath${pathSeparator}bgimg'),
-          getBgimgDir(path: docPath));
+      final fileDir = getFileDir(path: docPath);
+      final coverDir = getCoverDir(path: docPath);
+      final fontDir = getFontDir(path: docPath);
+      final bgimgDir = getBgimgDir(path: docPath);
 
-      DBHelper.close();
-      _copyDirectorySync(Directory('$extractPath${pathSeparator}databases'),
-          await getAnxDataBasesDir());
-      DBHelper().initDB();
+      final srcFileDir = Directory('$extractPath${pathSeparator}file');
+      final srcCoverDir = Directory('$extractPath${pathSeparator}cover');
+      final srcFontDir = Directory('$extractPath${pathSeparator}font');
+      final srcBgimgDir = Directory('$extractPath${pathSeparator}bgimg');
+      final srcDbDir = Directory('$extractPath${pathSeparator}databases');
 
-      await _restorePrefsFromBackup(extractPath);
+      Directory? fileBak;
+      Directory? coverBak;
+      Directory? fontBak;
+      Directory? bgimgBak;
+      Directory? dbBak;
 
-      AnxLog.info('importData: import success');
-      AnxToast.show(
-          L10n.of(navigatorKey.currentContext!).importSuccessRestartApp);
+      try {
+        if (srcFileDir.existsSync()) {
+          fileBak = _backupDirIfExists(fileDir, bakSuffix);
+          _copyDirectorySync(srcFileDir, fileDir);
+        }
+        if (srcCoverDir.existsSync()) {
+          coverBak = _backupDirIfExists(coverDir, bakSuffix);
+          _copyDirectorySync(srcCoverDir, coverDir);
+        }
+        if (srcFontDir.existsSync()) {
+          fontBak = _backupDirIfExists(fontDir, bakSuffix);
+          _copyDirectorySync(srcFontDir, fontDir);
+        }
+        if (srcBgimgDir.existsSync()) {
+          bgimgBak = _backupDirIfExists(bgimgDir, bakSuffix);
+          _copyDirectorySync(srcBgimgDir, bgimgDir);
+        }
+
+        if (srcDbDir.existsSync()) {
+          DBHelper.close();
+          final dbDir = await getAnxDataBasesDir();
+          dbBak = _backupDirIfExists(dbDir, bakSuffix);
+          _copyDirectorySync(srcDbDir, dbDir);
+          DBHelper().initDB();
+        }
+
+        await _restorePrefsFromBackup(extractPath);
+
+        if (decryptedApiKeys != null && decryptedApiKeys.isNotEmpty) {
+          _applyApiKeysToPrefs(decryptedApiKeys);
+        }
+
+        // Cleanup backups only after everything succeeds.
+        _deleteDirIfExists(fileBak);
+        _deleteDirIfExists(coverBak);
+        _deleteDirIfExists(fontBak);
+        _deleteDirIfExists(bgimgBak);
+        _deleteDirIfExists(dbBak);
+
+        AnxLog.info('importData: import success');
+        AnxToast.show(
+            L10n.of(navigatorKey.currentContext!).importSuccessRestartApp);
+      } catch (e) {
+        // Rollback best-effort.
+        _rollbackDir(fileBak, fileDir);
+        _rollbackDir(coverBak, coverDir);
+        _rollbackDir(fontBak, fontDir);
+        _rollbackDir(bgimgBak, bgimgDir);
+        // Databases directory is not under documents path.
+        if (dbBak != null) {
+          final dbDir = await getAnxDataBasesDir();
+          _rollbackDir(dbBak, dbDir);
+        }
+        rethrow;
+      }
     } catch (e) {
       AnxLog.info('importData: error while unzipping or copying files: $e');
       AnxToast.show(
@@ -274,6 +572,51 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
     } finally {
       SmartDialog.dismiss();
       await Directory(extractPath).delete(recursive: true);
+    }
+  }
+
+  Directory? _backupDirIfExists(Directory dir, String suffix) {
+    if (!dir.existsSync()) return null;
+    final bakPath = '${dir.path}$suffix';
+    final bakDir = Directory(bakPath);
+
+    if (bakDir.existsSync()) {
+      bakDir.deleteSync(recursive: true);
+    }
+
+    try {
+      dir.renameSync(bakPath);
+      return bakDir;
+    } catch (e) {
+      AnxLog.info('importData: failed to backup ${dir.path} -> $bakPath: $e');
+      rethrow;
+    }
+  }
+
+  void _rollbackDir(Directory? bakDir, Directory targetDir) {
+    if (bakDir == null) return;
+
+    try {
+      if (targetDir.existsSync()) {
+        targetDir.deleteSync(recursive: true);
+      }
+      if (bakDir.existsSync()) {
+        bakDir.renameSync(targetDir.path);
+      }
+    } catch (e) {
+      AnxLog.info('importData: rollback failed for ${targetDir.path}: $e');
+    }
+  }
+
+  void _deleteDirIfExists(Directory? dir) {
+    if (dir == null) return;
+    try {
+      if (dir.existsSync()) {
+        dir.deleteSync(recursive: true);
+      }
+    } catch (e) {
+      // Best effort; do not fail the import.
+      AnxLog.info('importData: failed to delete backup ${dir.path}: $e');
     }
   }
 
@@ -301,7 +644,10 @@ class _SyncSettingState extends ConsumerState<SyncSetting> {
 Future<String> createZipFile(Map<String, dynamic> params) async {
   RootIsolateToken token = params['token'];
   final String prefsBackupFilePath = params['prefsBackupFilePath'];
+  final String? manifestFilePath = params['manifestFilePath'] as String?;
   final File prefsBackupFile = File(prefsBackupFilePath);
+  final File? manifestFile =
+      manifestFilePath == null ? null : File(manifestFilePath);
   BackgroundIsolateBinaryMessenger.ensureInitialized(token);
   final date =
       '${DateTime.now().year}-${DateTime.now().month}-${DateTime.now().day}';
@@ -341,9 +687,17 @@ Future<String> createZipFile(Map<String, dynamic> params) async {
       await encoder.addFile(dir);
     }
   }
+
+  if (manifestFile != null && await manifestFile.exists()) {
+    await encoder.addFile(manifestFile, _backupManifestFileName);
+  }
+
   encoder.close();
   if (await prefsBackupFile.exists()) {
     await prefsBackupFile.delete();
+  }
+  if (manifestFile != null && await manifestFile.exists()) {
+    await manifestFile.delete();
   }
   return zipPath;
 }

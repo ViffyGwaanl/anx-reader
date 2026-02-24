@@ -1183,7 +1183,16 @@ class Reader {
     const walker = document.createTreeWalker(
       this.#doc.body,
       NodeFilter.SHOW_TEXT,
-      null,
+      {
+        acceptNode: (node) => {
+          // Defensive: translation nodes may already exist.
+          const parent = node?.parentElement;
+          if (parent && parent.classList && parent.classList.contains('translated-text')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      },
       false
     );
     while (walker.nextNode()) {
@@ -1197,7 +1206,15 @@ class Reader {
     const walker = document.createTreeWalker(
       this.#doc.body,
       NodeFilter.SHOW_TEXT,
-      null,
+      {
+        acceptNode: (node) => {
+          const parent = node?.parentElement;
+          if (parent && parent.classList && parent.classList.contains('translated-text')) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      },
       false
     );
     let node;
@@ -1207,13 +1224,50 @@ class Reader {
     }
   }
 
+  #getOriginalTextContent = (root) => {
+    if (!root) return ''
+
+    const ownerDoc = root.ownerDocument || document
+
+    const walker = ownerDoc.createTreeWalker(
+      root,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          // Exclude translated overlay nodes.
+          let el = node?.parentElement
+          while (el) {
+            if (el.classList && el.classList.contains('translated-text')) {
+              return NodeFilter.FILTER_REJECT
+            }
+            el = el.parentElement
+          }
+          return NodeFilter.FILTER_ACCEPT
+        }
+      },
+      false
+    )
+
+    let out = ''
+    while (walker.nextNode()) {
+      const node = walker.currentNode
+      // translator.js may hide original text by setting textContent = '' and
+      // storing the original in __originalContent.
+      const original = node && node.__originalContent !== undefined
+        ? node.__originalContent
+        : node.textContent
+      out += (original ?? '')
+    }
+    return out
+  }
+
   readingFeatures = () => {
     this.#restoreOriginalContent()
     readingFeaturesDocHandler(this.#doc)
   }
 
   getChapterContent = () => {
-    return this.#doc.body.textContent
+    return this.#getOriginalTextContent(this.#doc.body)
   }
 
   getChapterContentByHref = async (target, options = {}) => {
@@ -1227,7 +1281,7 @@ class Reader {
     if (!section?.createDocument) return ''
 
     const doc = await section.createDocument()
-    let content = doc?.body?.textContent ?? ''
+    let content = this.#getOriginalTextContent(doc?.body) ?? ''
 
     if (!content) return ''
 
@@ -1245,17 +1299,16 @@ class Reader {
   }
 
   getPreviousContent = (count = 2000) => {
-    let currentContainer = this.view.lastLocation?.range?.endContainer?.parentElement;
-    if (!currentContainer) return '';
+    let currentContainer = this.view.lastLocation?.range?.endContainer?.parentElement
+    if (!currentContainer) return ''
 
-    let text = '';
+    let text = ''
     while (text.length < count && currentContainer) {
-      text = currentContainer.textContent + text;
-      currentContainer = currentContainer.previousSibling;
+      text = this.#getOriginalTextContent(currentContainer) + text
+      currentContainer = currentContainer.previousElementSibling
     }
 
-    return text;
-
+    return text
   }
 
   getSelection = () => {

@@ -1,131 +1,90 @@
-# AI Provider Configuration UX Redesign (Cherry-style, Flutter-native)
+# AI Provider Center / Provider Configuration UX (Cherry-inspired, Flutter-native)
 
-## 0. Background / Current State
+## 0. Status
 
-Anx Reader currently supports multiple AI providers through LangChain chat model wrappers:
+**Implemented (fork).**
 
-- `openai` / `deepseek` / `openrouter` → **OpenAI-compatible** (`ChatOpenAI`)
-- `claude` → **Anthropic Messages API** (`ChatAnthropic`)
-- `gemini` → **Google Gemini API** (`ChatGoogleGenerativeAI`)
+This doc is no longer just a proposal; it documents the current Provider Center architecture + the remaining planned enhancements.
+
+> License note: Cherry Studio App is AGPL-3.0, Anx Reader is MIT. We only reuse UX ideas/patterns, no code.
+
+---
+
+## 1. Current State (fork)
+
+### 1.1 Information architecture
+
+- Settings top-level: “AI Provider Center” (parallel to AI settings)
+- Pages:
+  - Provider list page
+  - Provider detail/edit page
 
 Key code:
 
-- Registry/router: `lib/service/ai/langchain_registry.dart`
-- Provider defaults list: `lib/service/ai/ai_services.dart`
-- Settings UI (current): `lib/page/settings_page/ai.dart`
+- Provider Center UI:
+  - `lib/page/settings_page/ai_provider_center/ai_provider_center_page.dart`
+  - `lib/page/settings_page/ai_provider_center/ai_provider_detail_page.dart`
+- Provider meta model:
+  - `lib/models/ai_provider_meta.dart`
+- Storage:
+  - `lib/config/shared_preference_provider.dart`
 
-### Current UX pain points
+### 1.2 Storage model (security split)
 
-- The settings page creates `TextEditingController` inside `build()`, causing unstable editing and cursor jumps.
-- Provider config is a flat key/value list (`url`, `api_key`, `model`) with no guidance for OpenAI-compatible edge cases.
-- No good structure for “advanced” config: headers / temperature / top_p / tokens.
-- Not designed for managing multiple OpenAI-compatible endpoints (e.g. multiple gateways).
+We store **non-secret provider metadata** separately from **secret config**:
 
-## 1. Goals
+- Provider metas (non-secret): `aiProvidersV1`
+  - name/type/enabled/logo/createdAt/updatedAt
+- Per-provider config (may include secrets locally): `aiConfig_<providerId>`
+  - URL/baseUrl/model/headers/etc
+  - `api_key` is stored locally, but:
+    - NOT synced via WebDAV
+    - NOT included in plaintext backups
+    - only included in manual backup when encrypted
+- Models cache (ephemeral, excluded from backups): `aiModelsCacheV1_<providerId>`
 
-1. Make provider configuration **easy and reliable** (no cursor jump, clear field ordering).
-2. Provide a **Cherry-style information architecture**:
-   - provider list (cards)
-   - provider detail editor
-   - enable/disable
-   - test connection
-   - apply selected provider
-3. Support OpenAI-compatible real-world usage:
-   - custom headers (JSON)
-   - temperature / top_p / max_tokens (and Gemini max_output_tokens)
-4. Keep security rules unchanged:
-   - WebDAV sync must **NOT** include `api_key`
-   - backups must **NOT** include plaintext `api_key` unless encrypted
+### 1.3 Runtime mapping
 
-## 2. Non-goals
+- `Prefs().selectedAiService` stores the **provider id** (built-in id or custom uuid)
+- At runtime we map provider meta.type → stable LangChain registry id:
+  - OpenAI-compatible → `openai`
+  - Anthropic → `claude`
+  - Gemini → `gemini`
 
-- Do not copy/port code from other projects.
-- Do not implement embeddings here (separate roadmap).
+---
 
-## 3. Legal / Licensing note (important)
+## 2. What users can do
 
-Cherry Studio App (`https://github.com/CherryHQ/cherry-studio-app`) is licensed under **AGPL-3.0**.
+- Manage multiple providers (built-in + custom)
+- Enable/disable providers
+- Select current provider
+- Switch provider/model in chat
 
-Anx Reader is **MIT**.
+---
 
-Therefore:
+## 3. Planned enhancements
 
-- ✅ We may **use Cherry Studio as UX inspiration** (ideas, screenshots, interaction patterns).
-- ❌ We must **not copy code** (including “small” snippets) into this repo.
+### 3.1 Advanced provider fields UI
 
-## 4. Proposed UX
+- headers JSON editor
+- temperature/top_p/max_tokens
+- clearer URL normalization guidance (baseUrl vs endpoint)
 
-### 4.1 Provider list page
+### 3.2 “Thinking” UX per provider
 
-Each provider card shows:
+- OpenAI-compatible: optional “thinking summary” mode when `reasoning_content` is not provided
+- Gemini: includeThoughts toggle is supported; ensure default ON per preference
 
-- Logo + name
-- Provider type badge:
-  - OpenAI-compatible
-  - Anthropic
-  - Gemini
-- Enabled toggle
-- Selected indicator
-- Quick actions:
-  - Test
-  - Edit
+### 3.3 Sync policy extensions
 
-### 4.2 Provider editor page
+- Continue to exclude `api_key`
+- Evaluate whether headers should sync by default (risk: headers may contain secrets)
 
-**Basic fields (ordered):**
+---
 
-- Name (display only; optional for custom providers)
-- API base URL / endpoint
-- Model
-- API key (hide/show)
+## 4. Testing / Acceptance
 
-**Advanced fields (collapsible):**
-
-- Headers (JSON map)
-- Temperature
-- Top-p
-- Max tokens / Max output tokens
-
-**Actions:**
-
-- Save
-- Apply (set as selected)
-- Test
-- Reset
-- Delete (custom providers only)
-
-## 5. Data model & storage
-
-### 5.1 Phase 1 (minimal change)
-
-- Keep current storage keys:
-  - `Prefs().selectedAiService`
-  - `Prefs().getAiConfig(identifier)` and `Prefs().saveAiConfig(identifier, map)`
-
-- Improve UI only.
-
-### 5.2 Phase 2 (custom providers)
-
-Add the ability to create multiple OpenAI-compatible providers.
-
-Options:
-
-- (A) Store custom providers in `SharedPreferences` as a JSON list (recommended first).
-- (B) Migrate to a small local DB table (heavier).
-
-Sync impact:
-
-- Update WebDAV sync schema to include custom providers (still excluding `api_key`).
-
-## 6. Testing / Acceptance
-
-- Editing is stable (no cursor jumps, no losing input).
-- OpenAI-compatible provider with custom headers can pass Test.
-- Applying selected provider affects AI chat immediately.
-- WebDAV sync includes URL/model/prompts/UI settings but **does not change local api_key**.
-
-## 7. Implementation plan (proposed PR breakdown)
-
-- PR-9A: Refactor existing settings page controllers & field ordering.
-- PR-9B: Add advanced fields UI + persistence.
-- PR-9C (optional): Add custom OpenAI-compatible providers + sync schema update.
+- Editing fields is stable (no cursor jump)
+- Apply selected provider affects chat immediately
+- WebDAV sync: url/model/prompts sync; `api_key` unchanged
+- Backups: plaintext excludes api_key; encrypted import restores api_key only with correct password

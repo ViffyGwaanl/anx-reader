@@ -1,165 +1,104 @@
-# Implementation Plan (PR-6 / PR-7 / PR-8 + iOS Release)
+# Implementation Plan (AI stack on fork)
 
-## PR-6 — WebDAV Sync of AI Settings (no API key)
+This file tracks what is implemented in the fork and what remains, written as an engineering checklist.
 
-### Work breakdown
-
-Implementation branch: `feat/ai-settings-webdav-sync`
-
-1. **Schema + serializer**
-   - [x] Add `lib/service/sync/ai_settings_sync.dart`
-   - [x] Implement `buildLocalAiSettingsJson()`
-   - [x] Implement `applyAiSettingsJson()`
-   - Acceptance: round-trip serialize/deserialize works; api_key excluded.
-
-2. **WebDAV file transport integration**
-   - [x] Add remote path `anx/config/ai_settings.json`
-   - [x] Extend `lib/providers/sync.dart` `sync()` to upload/download (do not depend on book list)
-   - [x] Whole-file `updatedAt` conflict resolution (Phase 1)
-
-3. **Migration / Backward compatibility**
-   - [x] Missing/invalid JSON: log + skip
-   - [x] Unknown schemaVersion: skip
-
-4. **Testing**
-   - [ ] A→B sync: model/url/prompts/ui prefs arrive
-   - [ ] api_key untouched on B
-   - [ ] conflict: newer wins
-
-### Risks
-
-- Storing headers may include secrets → default to **not syncing headers** unless explicitly marked safe (optional enhancement).
+> Primary integration branch: `feat/ai-all-in-one`
 
 ---
 
-## PR-7 — Manual Backup/Restore Enhancements (Files/iCloud)
+## Completed (high level)
 
-### Work breakdown
+### UX
 
-Implementation branch: `feat/backup-restore-encrypted-api-key-squashed`
+- [x] iPad dock AI panel: resize + persist width/height
+- [x] iPad: dock side switch (left/right) + gesture conflict mitigation with TOC drawer
+- [x] iPad: panel mode setting (dock vs bottom sheet)
+- [x] Bottom sheet: resizable/minimizable with snap points; reading page opens expanded
+- [x] AI chat font scale
+- [x] Configurable input quick prompts
+- [x] Prompt editor maxLength → 20,000
 
-1. **Clarify UX copy**
-   - [ ] Update Settings labels (export/import wording)
-   - [x] Add explicit overwrite confirmation on import
+### Config / Sync / Backup
 
-2. **Package versioning**
-   - [x] Add `manifest.json` to exported ZIP (schemaVersion=4)
-   - [x] Ensure importer still supports legacy v3 (no manifest) (best-effort; v3 has no manifest)
+- [x] WebDAV sync of AI settings snapshot (`anx/config/ai_settings.json`)
+  - whole-file timestamp newer-wins
+  - **exclude api_key**
+- [x] Manual backup/restore via Files/iCloud
+  - v4 zip + manifest
+  - optional encrypted API key inclusion (password-based)
+  - rollback-safe import
 
-3. **Optional encrypted API key**
-   - [x] Add UI toggle + password prompts
-   - [x] Implement PBKDF2 + AES-GCM
-   - [x] Store encrypted blob in manifest
-   - [x] Import decrypt + apply
+### Provider Center + Cherry-inspired chat UX (Flutter-native)
 
-4. **Safe restore**
-   - [x] Staging + rollback (rename `.bak.<timestamp>`)
-   - [ ] WAL/SHM cleanup for DB (optional)
+- [x] Provider Center top-level entry + CRUD
+- [x] In-chat provider + model switch
+- [x] Thinking level selector + Gemini includeThoughts support
+- [x] Thinking/Answer/Tools collapsible sections
+- [x] Editable history + regenerate from any user turn
+- [x] Per-turn variants switcher
+- [x] Conversation tree v2 persistence (`conversationV2`) + rollback
 
-5. **Testing**
-   - [ ] iOS Files: iCloud Drive export/import
-   - [x] wrong password (unit test + UI path)
-   - [ ] corrupt zip
+### OpenAI-compatible reasoning display
 
-### Risks
-
-- Crypto implementation mistakes → prefer vetted dependency; add test vectors.
-- iCloud file provider deadlocks on some versions → ensure operations are async + timeouts + user feedback.
-
----
-
-## PR-8 — Reading/AI UX Hotfix
-
-Implementation branch: `feat/ui-fixes`
-
-1. **Font scale popup stability**
-   - [x] Replace sheet-style popup with `AlertDialog` to avoid sheet-on-sheet auto dismiss
-
-2. **Bookshelf pixel overflow**
-   - [x] Fix `bottom overflowed by 1.00 pixels` by relaxing layout constraints
-
-3. **Bottom sheet sizing**
-   - [x] Remove hard-to-control resizing; use fixed large height (~95% screen)
-   - [ ] (optional) Remove / deprecate `aiSheetInitialSize` usage in UI code, keep for backward compatibility
-
-4. **Bottom sheet quick entry gesture**
-   - [x] Add swipe-up-from-lower-middle gesture to open AI in bottom sheet mode
-   - [ ] Tune gesture region/threshold based on iPhone/iPad real-device feedback
+- [x] Map `reasoning_content` / `reasoning` to Thinking section when provided by backend.
 
 ---
 
-## iOS / TestFlight Release Checklist (fork)
+## Root-cause fix: provider-managed streaming (DONE)
 
-> 推荐用 Xcode Archive → Upload to TestFlight。命令行 `flutter build ipa` 更容易踩签名坑。
+### Problem statement
 
-- [ ] Ensure Bundle IDs are unique (Runner + shareExtension)
-- [ ] Ensure Signing & Capabilities are correct for all targets (Team, App Groups)
-- [ ] Bump build number in `pubspec.yaml` (`version: x.y.z+BUILD`, BUILD must increase)
-- [ ] Regenerate iOS build settings so `ios/Flutter/Generated.xcconfig` picks up the new build number
-  - Suggested: `flutter build ios --release --no-codesign`
-- [x] Keep Xcode build setting aligned: Runner `CURRENT_PROJECT_VERSION = $(FLUTTER_BUILD_NUMBER)`
-- [ ] Xcode: Product → Archive (Any iOS Device)
-- [ ] Organizer: Distribute App → App Store Connect → Upload
-- [ ] App Store Connect: resolve Export Compliance questions if prompted (crypto)
+- UI-owned `StreamSubscription` is fragile: minimizing a sheet, swapping scroll controllers, or route rebuilds can interrupt streaming.
 
----
+### Implementation
 
-## PR-9 (planned) — AI Provider Configuration UX Refactor
+- [x] Move chat streaming ownership into `aiChatProvider` (keepAlive)
+  - `startStreaming(...)` runs generation and updates provider `state` per chunk
+  - `cancelStreaming()` cancels generation
+  - `aiChatStreamingProvider` exposes streaming status for UI
+- [x] Update `AiChatStream` to be “render-only”
+  - no widget-owned streaming controller/subscription
+  - send/regen/edit call provider methods
+- [x] Refactor agent/tool code paths to accept Riverpod core `Ref` (provider-friendly)
 
-Reference: `docs/ai/ai_provider_config_ux.md`
+### Acceptance criteria
 
-1. **Stabilize editing (Phase A)**
-   - [ ] Move `TextEditingController` ownership into State (no controllers created in `build()`)
-   - [ ] Fixed field order + clearer labels (url/model/api_key)
-   - [ ] Improve error reporting on Test
-
-2. **Advanced fields (Phase B)**
-   - [ ] Expose headers (JSON), temperature/top_p/max_tokens
-   - [ ] Persist into provider config map (`Prefs().saveAiConfig`)
-
-3. **Custom OpenAI-compatible providers (optional Phase C)**
-   - [ ] Allow multiple OpenAI-compatible entries
-   - [ ] Update WebDAV sync schema to include custom providers (still exclude api_key)
+- [ ] Reading page: minimize bottom sheet → generation continues (no interruption)
+- [ ] Close the sheet (not exit reading page) → generation continues
+- [ ] Stop button cancels immediately
+- [ ] No crashes/assertions during rapid minimize/expand
 
 ---
 
-## PR-10 (planned) — AI Translation UX Hardening
+## Next work (planned)
 
-Reference: `docs/ai/ai_translation_design.md`
+### A) OpenAI-compatible “thinking” (provider-only)
 
-- [ ] Split translation prompts: selection vs full-text
-- [ ] Full-text translation prompt must output translation-only
-- [ ] Add length caps / chunking for stability
-- [ ] PDF: add safe fallback guidance (selection preferred)
+Background: many OpenAI-compatible providers do not return `reasoning_content`.
 
----
+- [ ] Do NOT add prompt-based thinking fallback. If provider returns nothing, show nothing.
+- [ ] Ensure `reasoning_content`/`reasoning` is preserved end-to-end and rendered as Thinking.
+- [ ] thinkingMode=off: do not request reasoning; but if backend still returns reasoning_content, display it.
+- [ ] Add unit tests for streaming parsing (metadata reasoning_content/reasoning).
+- [ ] Update docs: `ai_thinking_openai_provider_only_zh.md`
 
-## PR-11 (planned) — PDF AI “Chapter” Extraction Improvements
+### B) Provider Center stability / iPad navigation
 
-Reference: `docs/ai/pdf_ai_chaptering_and_ocr.md`
+- [ ] Re-test `_dependents.isEmpty` assertion under rapid navigation
+- [ ] Remove any remaining redundant `Prefs().initPrefs()` patterns if still present
 
-- [ ] When PDF outline exists: treat TOC items as page ranges, return multi-page chapter content
-- [ ] When outline missing: page-window fallback for "current chapter"
-- [ ] Ensure `maxCharacters` capping works consistently
+### C) Conversation tree v2 test hardening
 
----
+- [ ] Add widget test: edit+regen creates branch, then switch variant back and assert previous subtree restores
 
-## PR-12 (planned) — MinerU OCR Integration for Scanned PDFs
+### D) iOS install / TestFlight polish
 
-Reference: `docs/ai/pdf_ai_chaptering_and_ocr.md`
-
-- [ ] Integrate MinerU (HTTP or CLI runner)
-- [ ] Cache OCR results per book
-- [ ] Tool fallback: if PDF text layer empty → use OCR cache
-- [ ] UX: status + progress + retry
+- [ ] Add a short “install checklist” section to docs for common signing/entitlements issues
+- [ ] Capture known Xcode error signatures and fixes
 
 ---
 
-## PR-13 (planned) — Whole-book Q&A Quality Improvements
+## Engineering constraints (important)
 
-- Phase 1 (no embeddings):
-  - [ ] Keyword search query expansion
-  - [ ] Snippet aggregation + targeted chapter/page fetch
-- Phase 2 (optional):
-  - [ ] Embeddings + rerank (larger scope; requires provider/infra decisions)
-
+- License: Cherry Studio App is AGPL-3.0, Anx Reader is MIT → UX inspiration only, no code reuse.
+- Generated files are gitignored → always run build_runner + l10n generation when switching branches.

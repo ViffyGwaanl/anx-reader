@@ -1,3 +1,8 @@
+// NOTE: This file is kept as a local scratchpad for manual debugging.
+// It MUST include a `main()` to avoid breaking `flutter test`.
+
+void main() {}
+
 // import 'dart:io';
 //
 // import 'package:anx_reader/service/book_player/book_player.dart';

@@ -1,5 +1,7 @@
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/enums/ai_prompts.dart';
+import 'package:anx_reader/enums/ai_dock_side.dart';
+import 'package:anx_reader/enums/ai_pad_panel_mode.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/providers/ai_cache_count.dart';
 import 'package:anx_reader/providers/user_prompts.dart';
@@ -7,9 +9,12 @@ import 'package:anx_reader/service/ai/ai_services.dart';
 import 'package:anx_reader/service/ai/index.dart';
 import 'package:anx_reader/service/ai/prompt_generate.dart';
 import 'package:anx_reader/service/ai/tools/ai_tool_registry.dart';
+import 'package:anx_reader/page/settings_page/ai_provider_center/ai_provider_center_page.dart';
 import 'package:anx_reader/widgets/ai/ai_stream.dart';
 import 'package:anx_reader/widgets/common/anx_button.dart';
 import 'package:anx_reader/widgets/delete_confirm.dart';
+import 'package:anx_reader/page/settings_page/ai_quick_prompts_editor.dart';
+import 'package:anx_reader/page/settings_page/subpage/log_page.dart';
 import 'package:anx_reader/widgets/settings/settings_section.dart';
 import 'package:anx_reader/widgets/settings/settings_tile.dart';
 import 'package:anx_reader/widgets/settings/settings_title.dart';
@@ -120,6 +125,11 @@ class _AISettingsState extends ConsumerState<AISettings> {
         "variables": ["text", "to_locale", "from_locale", "contextText"],
       },
       {
+        "identifier": AiPrompts.translateFulltext,
+        "title": l10n.settingsAiPromptTranslateFulltext,
+        "variables": ["text", "to_locale", "from_locale", "contextText"],
+      },
+      {
         "identifier": AiPrompts.mindmap,
         "title": l10n.settingsAiPromptMindmap,
         "variables": [],
@@ -137,6 +147,20 @@ class _AISettingsState extends ConsumerState<AISettings> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
           ),
+          CustomSettingsTile(
+            child: SettingsTile.navigation(
+              title: Text(l10n.settingsAiProviderCenterTitle),
+              description: Text(l10n.settingsAiProviderCenterDesc),
+              onPressed: (context) {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const AiProviderCenterPage(),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 10),
           for (var key in services[currentIndex]["config"].keys)
             Padding(
               padding: const EdgeInsets.only(bottom: 10),
@@ -247,86 +271,19 @@ class _AISettingsState extends ConsumerState<AISettings> {
       );
     }
 
-    var servicesTile = CustomSettingsTile(
-        child: AnimatedSize(
-      duration: const Duration(milliseconds: 200),
-      curve: Curves.easeInOut,
-      alignment: Alignment.topCenter,
-      child: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: 100,
-              child: ListView.builder(
-                shrinkWrap: true,
-                scrollDirection: Axis.horizontal,
-                itemCount: services.length,
-                itemBuilder: (context, index) {
-                  return Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: InkWell(
-                      onTap: () {
-                        if (showSettings) {
-                          if (currentIndex == index) {
-                            setState(() {
-                              showSettings = false;
-                            });
-                            return;
-                          }
-                          showSettings = false;
-                          Future.delayed(
-                            const Duration(milliseconds: 200),
-                            () {
-                              setState(() {
-                                showSettings = true;
-                                currentIndex = index;
-                              });
-                            },
-                          );
-                        } else {
-                          showSettings = true;
-                          currentIndex = index;
-                        }
-
-                        setState(() {});
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(10),
-                        width: 100,
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                              color: Prefs().selectedAiService ==
-                                      services[index]["identifier"]
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Colors.grey),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            Image.asset(
-                              services[index]["logo"],
-                              height: 25,
-                            ),
-                            const SizedBox(
-                              height: 10,
-                            ),
-                            FittedBox(child: Text(services[index]["title"])),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-              ),
+    final servicesTile = CustomSettingsTile(
+      child: SettingsTile.navigation(
+        title: Text(l10n.settingsAiProviderCenterTitle),
+        description: Text(l10n.settingsAiProviderCenterDesc),
+        onPressed: (context) {
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => const AiProviderCenterPage(),
             ),
-            !showSettings ? const SizedBox() : aiConfig(),
-          ],
-        ),
+          );
+        },
       ),
-    ));
+    );
 
     var promptTile = CustomSettingsTile(
       child: ListView.builder(
@@ -488,6 +445,59 @@ class _AISettingsState extends ConsumerState<AISettings> {
           toolsTile,
         ],
       ),
+      // iPad-specific AI panel settings (only show on larger screens)
+      if (MediaQuery.of(context).size.width >= 600)
+        SettingsSection(
+          title: Text(l10n.settingsAiPadPanelMode),
+          tiles: [
+            SettingsTile.switchTile(
+              title: Text(l10n.settingsAiPadPanelModeBottomSheet),
+              description: Text(l10n.settingsAiPadPanelModeDock),
+              initialValue:
+                  Prefs().aiPadPanelMode == AiPadPanelModeEnum.bottomSheet,
+              onToggle: (value) {
+                setState(() {
+                  Prefs().aiPadPanelMode = value
+                      ? AiPadPanelModeEnum.bottomSheet
+                      : AiPadPanelModeEnum.dock;
+                });
+              },
+            ),
+            // Dock side only relevant when in dock mode
+            if (Prefs().aiPadPanelMode == AiPadPanelModeEnum.dock)
+              SettingsTile.navigation(
+                title: Text(l10n.settingsAiDockSide),
+                value: Text(Prefs().aiDockSide == AiDockSideEnum.left
+                    ? l10n.settingsAiDockSideLeft
+                    : l10n.settingsAiDockSideRight),
+                onPressed: (context) {
+                  setState(() {
+                    Prefs().aiDockSide =
+                        Prefs().aiDockSide == AiDockSideEnum.left
+                            ? AiDockSideEnum.right
+                            : AiDockSideEnum.left;
+                  });
+                },
+              ),
+          ],
+        ),
+      SettingsSection(
+        title: Text(l10n.settingsAiQuickPrompts),
+        tiles: [
+          SettingsTile.navigation(
+            title: Text(l10n.settingsAiQuickPrompts),
+            description: Text(l10n.settingsAiQuickPromptsHint),
+            onPressed: (context) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const AiQuickPromptsEditor(),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
       SettingsSection(
         title: Text(L10n.of(context).settingsAiCache),
         tiles: [
@@ -551,6 +561,31 @@ class _AISettingsState extends ConsumerState<AISettings> {
                   ),
                 );
               }),
+        ],
+      ),
+      SettingsSection(
+        title: Text(l10n.settingsAiDebugTitle),
+        tiles: [
+          SettingsTile.switchTile(
+            leading: const Icon(Icons.developer_mode),
+            title: Text(l10n.settingsAiDebugEnable),
+            description: Text(l10n.settingsAiDebugEnableDesc),
+            initialValue: Prefs().aiDebugLogsEnabled,
+            onToggle: (value) {
+              setState(() {
+                Prefs().aiDebugLogsEnabled = value;
+              });
+            },
+          ),
+          SettingsTile.navigation(
+            leading: const Icon(Icons.bug_report),
+            title: Text(L10n.of(context).settingsAdvancedLog),
+            onPressed: (context) {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LogPage()),
+              );
+            },
+          ),
         ],
       ),
     ]);
@@ -752,7 +787,7 @@ class _AISettingsState extends ConsumerState<AISettings> {
           ),
           maxLines: 8,
           minLines: 5,
-          maxLength: 2000,
+          maxLength: 20000,
         ),
         const SizedBox(height: 12),
 
@@ -834,7 +869,7 @@ class _AISettingsState extends ConsumerState<AISettings> {
                 ),
                 maxLines: 8,
                 minLines: 5,
-                maxLength: 2000,
+                maxLength: 20000,
               ),
             ],
           ),

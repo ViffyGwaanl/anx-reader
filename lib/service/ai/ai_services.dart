@@ -39,6 +39,14 @@ List<AiServiceOption> buildDefaultAiServices() {
             defaultModel: 'gpt-4o-mini',
           ),
     AiServiceOption(
+      identifier: 'openai-responses',
+      title: 'OpenAI Responses',
+      logo: 'assets/images/openai.png',
+      defaultUrl: 'https://api.openai.com/v1/responses',
+      defaultApiKey: 'YOUR_API_KEY',
+      defaultModel: 'gpt-5-mini',
+    ),
+    AiServiceOption(
       identifier: 'claude',
       title: 'Claude',
       logo: 'assets/images/claude.png',

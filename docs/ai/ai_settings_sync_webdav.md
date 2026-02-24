@@ -35,6 +35,9 @@ We want AI-related configuration to be **portable across devices**, but with str
 - Prompt templates (`ai_prompts` overrides)
 - User custom prompts
 - Input quick prompts
+- AI translation prefs (safe, no secrets):
+  - translation-dedicated provider id + model override
+  - inline full-text translation concurrency
 - AI panel UI prefs:
   - iPad panel mode, dock side
   - dock width/height
@@ -84,6 +87,11 @@ We want AI-related configuration to be **portable across devices**, but with str
     "aiPanelHeight": 300,
     "aiSheetInitialSize": 0.6,
     "aiChatFontScale": 1.0
+  },
+  "translate": {
+    "aiTranslateProviderIdV1": "<provider-id-or-empty>",
+    "aiTranslateModelV1": "<model-or-empty>",
+    "inlineFullTextTranslateConcurrency": 4
   }
 }
 ```

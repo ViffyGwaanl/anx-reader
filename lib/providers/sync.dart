@@ -13,6 +13,7 @@ import 'package:anx_reader/providers/tb_groups.dart';
 import 'package:anx_reader/service/sync/sync_client_factory.dart';
 import 'package:anx_reader/service/sync/sync_client_base.dart';
 import 'package:anx_reader/service/database_sync_manager.dart';
+import 'package:anx_reader/service/sync/ai_settings_sync.dart';
 import 'package:anx_reader/dao/database.dart';
 import 'package:anx_reader/utils/get_path/databases_path.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -22,6 +23,7 @@ import 'package:path/path.dart';
 import 'package:anx_reader/utils/log/common.dart';
 import 'package:anx_reader/utils/toast/common.dart';
 import 'package:anx_reader/utils/get_path/get_base_path.dart';
+import 'package:anx_reader/utils/get_path/get_temp_dir.dart';
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/dao/book.dart';
 import 'package:flutter/material.dart';
@@ -287,17 +289,19 @@ class Sync extends _$Sync {
     try {
       await syncDatabase(finalDirection);
 
+      // Sync AI settings snapshot (does not depend on book list).
+      await syncAiSettings();
+
       if (await isCurrentEmpty()) {
-        await _showSyncAbortedDialog();
-        changeState(state.copyWith(isSyncing: false));
-        return;
-      }
+        AnxLog.info('Sync: current library is empty, skip file sync');
+      } else {
+        if (Prefs().syncCompletedToast) {
+          AnxToast.show(
+              L10n.of(navigatorKey.currentContext!).webdavSyncingFiles);
+        }
 
-      if (Prefs().syncCompletedToast) {
-        AnxToast.show(L10n.of(navigatorKey.currentContext!).webdavSyncingFiles);
+        await syncFiles();
       }
-
-      await syncFiles();
 
       imageCache.clear();
       imageCache.clearLiveImages();
@@ -325,6 +329,67 @@ class Sync extends _$Sync {
     } finally {
       changeState(state.copyWith(isSyncing: false));
       // _deleteBackUpDb();
+    }
+  }
+
+  Future<void> syncAiSettings() async {
+    final client = _syncClient;
+    if (client == null) return;
+
+    const remotePath = 'anx/config/ai_settings.json';
+
+    try {
+      await client.mkdirAll('anx/config');
+    } catch (e) {
+      AnxLog.info('Sync: failed to ensure anx/config: $e');
+    }
+
+    final localUpdatedAt = Prefs().aiSettingsUpdatedAt;
+
+    Map<String, dynamic>? remote;
+    int remoteUpdatedAt = 0;
+
+    try {
+      final exists = await client.isExist(remotePath);
+      if (exists) {
+        final tempDir = await getAnxTempDir();
+        final localPath = join(tempDir.path, 'ai_settings.json');
+        await downloadFile(remotePath, localPath);
+        final raw = await io.File(localPath).readAsString();
+        remote = parseAiSettingsJsonString(raw);
+        remoteUpdatedAt = (remote?['updatedAt'] as num?)?.toInt() ?? 0;
+      }
+    } catch (e) {
+      AnxLog.info('Sync: failed to download ai_settings.json: $e');
+    }
+
+    // Phase 1 merge: whole-file snapshot newer-wins.
+    final shouldApplyRemote = remote != null &&
+        (remoteUpdatedAt > localUpdatedAt || localUpdatedAt == 0);
+
+    if (shouldApplyRemote) {
+      applyAiSettingsJson(remote!);
+      return;
+    }
+
+    final shouldUploadLocal =
+        remote == null || localUpdatedAt > remoteUpdatedAt;
+    if (!shouldUploadLocal) {
+      return;
+    }
+
+    // Upload local snapshot when local is newer, or when remote is missing.
+    try {
+      if (Prefs().aiSettingsUpdatedAt == 0) {
+        Prefs().touchAiSettingsUpdatedAt();
+      }
+      final json = buildLocalAiSettingsJson();
+      final tempDir = await getAnxTempDir();
+      final localPath = join(tempDir.path, 'ai_settings.json');
+      await io.File(localPath).writeAsString(encodeAiSettingsJson(json));
+      await uploadFile(localPath, remotePath);
+    } catch (e) {
+      AnxLog.info('Sync: failed to upload ai_settings.json: $e');
     }
   }
 

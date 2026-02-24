@@ -7,7 +7,13 @@ import 'package:anx_reader/enums/code_highlight_theme.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/page/reading_page.dart';
 import 'package:anx_reader/page/settings_page/subpage/fonts.dart';
+import 'package:anx_reader/service/translate/fulltext_translate_runtime.dart';
+import 'package:anx_reader/utils/toast/common.dart';
+import 'package:anx_reader/enums/inline_fulltext_translate_failure_reason.dart';
+import 'package:anx_reader/models/inline_fulltext_translation_progress.dart';
+import 'package:anx_reader/service/translate/inline_fulltext_translation_status.dart';
 import 'package:anx_reader/widgets/common/anx_segmented_button.dart';
+import 'package:anx_reader/widgets/reading_page/style_widget.dart';
 import 'package:flutter/material.dart';
 import 'package:icons_plus/icons_plus.dart';
 
@@ -328,6 +334,264 @@ class _ReadingMoreSettingsState extends State<ReadingMoreSettings> {
                 ),
               ],
             ),
+            const SizedBox(height: 6),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: isReading
+                    ? () async {
+                        final currentBookId =
+                            epubPlayerKey.currentState!.widget.book.id;
+                        await FullTextTranslateRuntime.instance
+                            .clearBook(currentBookId);
+
+                        // Also clear current DOM overlays so user sees immediate effect.
+                        await epubPlayerKey.currentState?.webViewController
+                            .evaluateJavascript(source: '''
+if (typeof reader !== 'undefined' && reader.view && reader.view.clearTranslations) {
+  reader.view.clearTranslations();
+}
+''');
+
+                        AnxToast.show(
+                          L10n.of(context)
+                              .readingPageFullTextTranslationCacheCleared,
+                        );
+                      }
+                    : null,
+                icon: const Icon(Icons.delete_outline, size: 18),
+                label: Text(
+                  L10n.of(context).readingPageClearFullTextTranslationCache,
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: isReading
+                    ? () async {
+                        // Reset counters to avoid stacking on repeated retries.
+                        epubPlayerKey.currentState?.resetInlineTranslateHudStats();
+
+                        ({int started, int candidates})? parseStats(dynamic v) {
+                          try {
+                            if (v is Map) {
+                              final started = (v['started'] as num?)?.toInt();
+                              final candidates =
+                                  (v['candidates'] as num?)?.toInt();
+                              if (started != null && candidates != null) {
+                                return (started: started, candidates: candidates);
+                              }
+                            }
+                          } catch (_) {}
+                          return null;
+                        }
+
+                        // Retry current viewport translations.
+                        try {
+                          final result = await epubPlayerKey
+                              .currentState?.webViewController
+                              .callAsyncJavaScript(functionBody: '''
+if (typeof reader !== 'undefined' && reader.view && reader.view.forceTranslateForViewport) {
+  return await reader.view.forceTranslateForViewport(true);
+}
+return null;
+''');
+
+                          final stats = parseStats(result?.value);
+                          if (stats != null) {
+                            InlineFullTextTranslationStatusBus.instance
+                                .reportManualRetry(
+                              started: stats.started,
+                              candidates: stats.candidates,
+                            );
+
+                            AnxToast.show(
+                              L10n.of(context).readingPageTranslateRetryTriggered(
+                                stats.started,
+                                stats.candidates,
+                              ),
+                            );
+                          }
+                        } catch (_) {}
+
+                        // Show HUD when not in scroll mode.
+                        epubPlayerKey.currentState?.showInlineTranslateHud();
+                      }
+                    : null,
+                icon: const Icon(Icons.refresh, size: 18),
+                label: Text(L10n.of(context).readingPageRetryTranslation),
+              ),
+            ),
+
+            // Live background status (reading-page only)
+            if (isReading)
+              ValueListenableBuilder<InlineFullTextTranslationProgress>(
+                valueListenable:
+                    InlineFullTextTranslationStatusBus.instance.progress,
+                builder: (context, p, _) {
+                  final status = p.active
+                      ? L10n.of(context).settingsTranslateBackgroundStatusActive(
+                          p.done,
+                          p.total,
+                          p.inflight,
+                          p.pending,
+                          p.failed,
+                        )
+                      : L10n.of(context).settingsTranslateBackgroundStatusIdle;
+
+                  return ValueListenableBuilder<
+                      Map<InlineFullTextTranslateFailureReason, int>>(
+                    valueListenable:
+                        InlineFullTextTranslationStatusBus.instance.failureReasons,
+                    builder: (context, reasons, _) {
+                      String? reasonText;
+                      if (p.failed > 0 && reasons.isNotEmpty) {
+                        final sorted = reasons.entries.toList(growable: false)
+                          ..sort((a, b) => b.value.compareTo(a.value));
+
+                        final top = sorted.take(3).map((e) {
+                          final label = switch (e.key) {
+                            InlineFullTextTranslateFailureReason.rateLimit =>
+                              L10n.of(context)
+                                  .readingPageTranslateFailureReasonRateLimit,
+                            InlineFullTextTranslateFailureReason.auth =>
+                              L10n.of(context)
+                                  .readingPageTranslateFailureReasonAuth,
+                            InlineFullTextTranslateFailureReason.notConfigured =>
+                              L10n.of(context)
+                                  .readingPageTranslateFailureReasonNotConfigured,
+                            InlineFullTextTranslateFailureReason.untranslatedEcho =>
+                              L10n.of(context)
+                                  .readingPageTranslateFailureReasonUntranslated,
+                            InlineFullTextTranslateFailureReason.translateError =>
+                              L10n.of(context)
+                                  .readingPageTranslateFailureReasonTranslateError,
+                            InlineFullTextTranslateFailureReason.exception =>
+                              L10n.of(context)
+                                  .readingPageTranslateFailureReasonException,
+                            InlineFullTextTranslateFailureReason.unknown =>
+                              L10n.of(context)
+                                  .readingPageTranslateFailureReasonUnknown,
+                          };
+                          return '$label×${e.value}';
+                        }).join(' · ');
+
+                        reasonText =
+                            '${L10n.of(context).readingPageTranslateFailureReasons}: $top';
+                      }
+
+                      String? retryText;
+                      final started = p.lastRetryStarted;
+                      final candidates = p.lastRetryCandidates;
+                      if (started != null && candidates != null) {
+                        retryText =
+                            L10n.of(context).readingPageTranslateLastRetryStats(
+                          started,
+                          candidates,
+                        );
+                      }
+
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${L10n.of(context).settingsTranslateBackgroundStatus}: $status',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(color: Colors.grey),
+                            ),
+                            if (reasonText != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  reasonText,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(color: Colors.grey),
+                                ),
+                              ),
+                            if (retryText != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2),
+                                child: Text(
+                                  retryText,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodySmall
+                                      ?.copyWith(color: Colors.grey),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: isReading
+                    ? () async {
+
+                  final current = Prefs().inlineFullTextTranslateConcurrency;
+                  final selected = await showModalBottomSheet<int>(
+                    context: context,
+                    builder: (context) {
+                      return SafeArea(
+                        child: ListView(
+                          children: [
+                            for (var i = 1; i <= 8; i++)
+                              ListTile(
+                                title: Text(
+                                  L10n.of(context)
+                                      .readingPageTranslateConcurrencyValue(i),
+                                ),
+                                trailing:
+                                    i == current ? const Icon(Icons.check) : null,
+                                onTap: () => Navigator.pop(context, i),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+
+                  if (selected != null) {
+                    Prefs().inlineFullTextTranslateConcurrency = selected;
+                    setState(() {});
+                  }
+                }
+                    : null,
+                icon: const Icon(Icons.speed, size: 18),
+                label: Text(
+                  L10n.of(context).readingPageTranslateConcurrencyValue(
+                        Prefs().inlineFullTextTranslateConcurrency,
+                      ),
+                ),
+              ),
+            ),
+            if (Prefs().pageTurnStyle != PageTurn.scroll)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: isReading
+                      ? () {
+                          epubPlayerKey.currentState?.showInlineTranslateHud();
+                        }
+                      : null,
+                  icon: const Icon(Icons.visibility, size: 18),
+                  label: Text(
+                    L10n.of(context).readingPageShowTranslateHud,
+                  ),
+                ),
+              ),
           ],
         ),
       );

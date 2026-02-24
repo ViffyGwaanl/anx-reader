@@ -16,11 +16,14 @@ import 'package:anx_reader/enums/translation_mode.dart';
 import 'package:anx_reader/enums/writing_mode.dart';
 import 'package:anx_reader/enums/text_alignment.dart';
 import 'package:anx_reader/enums/ai_panel_position.dart';
+import 'package:anx_reader/enums/ai_dock_side.dart';
+import 'package:anx_reader/enums/ai_pad_panel_mode.dart';
 import 'package:anx_reader/enums/code_highlight_theme.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/main.dart';
 import 'package:anx_reader/models/bgimg.dart';
 import 'package:anx_reader/models/book_style.dart';
+import 'package:anx_reader/models/ai_input_quick_prompt.dart';
 import 'package:anx_reader/models/chapter_split_presets.dart';
 import 'package:anx_reader/models/chapter_split_rule.dart';
 import 'package:anx_reader/models/font_model.dart';
@@ -29,6 +32,7 @@ import 'package:anx_reader/models/read_theme.dart';
 import 'package:anx_reader/models/reading_info.dart';
 import 'package:anx_reader/models/reading_rules.dart';
 import 'package:anx_reader/models/user_prompt.dart';
+import 'package:anx_reader/models/ai_provider_meta.dart';
 import 'package:anx_reader/widgets/statistic/dashboard_tiles/dashboard_tile_registry.dart';
 import 'package:anx_reader/models/window_info.dart';
 import 'package:anx_reader/service/ai/tools/ai_tool_registry.dart';
@@ -68,9 +72,39 @@ class Prefs extends ChangeNotifier {
   static const String _enabledAiToolsKey = 'enabledAiTools';
   static const String _userPromptsKey = 'userPrompts';
 
+  // Home tabs config (order + enable), backed by SharedPreferences.
+  // papers + settings are mandatory and cannot be disabled.
+  static const int _homeTabsSchemaVersion = 1;
+  static const String _homeTabsSchemaVersionKey = 'homeTabsSchemaVersion';
+  static const String _homeTabsOrderKey = 'homeTabsOrder';
+  static const String _homeTabsEnabledKey = 'homeTabsEnabled';
+
+  static const String homeTabPapers = 'papers';
+  static const String homeTabBookshelf = 'bookshelf';
+  static const String homeTabStatistics = 'statistics';
+  static const String homeTabAI = 'ai';
+  static const String homeTabNotes = 'notes';
+  static const String homeTabSettings = 'settings';
+
+  static const List<String> _homeTabAll = [
+    homeTabPapers,
+    homeTabBookshelf,
+    homeTabStatistics,
+    homeTabAI,
+    homeTabNotes,
+    homeTabSettings,
+  ];
+
+  static const Set<String> _homeTabMandatory = {
+    homeTabPapers,
+    homeTabSettings,
+  };
+
   Future<void> initPrefs() async {
     prefs = await SharedPreferences.getInstance();
     saveBeginDate();
+    _migrateHomeTabsIfNeeded();
+    _normalizeAndPersistHomeTabsConfig();
     notifyListeners();
   }
 
@@ -118,7 +152,30 @@ class Prefs extends ChangeNotifier {
       prefsBackupVersionKey: prefsBackupSchemaVersion,
     };
     for (final String key in prefs.getKeys()) {
-      final Object? value = prefs.get(key);
+      // Skip ephemeral caches.
+      if (key.startsWith(_aiModelsCacheV1Prefix)) {
+        continue;
+      }
+
+      Object? value = prefs.get(key);
+
+      // Never include AI API keys in plain backups.
+      if (key.startsWith('aiConfig_') && value is String) {
+        try {
+          final decoded = jsonDecode(value);
+          if (decoded is Map<String, dynamic>) {
+            decoded.remove('api_key');
+            value = jsonEncode(decoded);
+          } else if (decoded is Map) {
+            final map = decoded.cast<String, dynamic>();
+            map.remove('api_key');
+            value = jsonEncode(map);
+          }
+        } catch (_) {
+          // ignore parse errors
+        }
+      }
+
       final Map<String, Object?>? encoded = encodePrefsBackupEntry(value);
       if (encoded != null) {
         backup[key] = encoded;
@@ -130,7 +187,9 @@ class Prefs extends ChangeNotifier {
   Future<void> applyPrefsBackupMap(Map<String, dynamic> backup) async {
     for (final MapEntry<String, dynamic> entry in backup.entries) {
       final String key = entry.key;
-      if (key == prefsBackupVersionKey || _prefsImportSkipKeys.contains(key)) {
+      if (key == prefsBackupVersionKey ||
+          _prefsImportSkipKeys.contains(key) ||
+          key.startsWith(_aiModelsCacheV1Prefix)) {
         continue;
       }
       final dynamic entryValue = entry.value;
@@ -149,7 +208,40 @@ class Prefs extends ChangeNotifier {
           if (value is num) await prefs.setDouble(key, value.toDouble());
           break;
         case 'string':
-          if (value is String) await prefs.setString(key, value);
+          if (value is String) {
+            // Preserve local-only secrets.
+            if (key.startsWith('aiConfig_')) {
+              try {
+                final incoming = jsonDecode(value);
+                final existingRaw = prefs.getString(key);
+                final existing =
+                    existingRaw == null ? null : jsonDecode(existingRaw);
+
+                String? existingApiKey;
+                if (existing is Map) {
+                  existingApiKey = existing['api_key']?.toString();
+                }
+
+                if (incoming is Map) {
+                  final map = incoming.cast<String, dynamic>();
+
+                  // Never import api keys from plain backup.
+                  map.remove('api_key');
+
+                  if (existingApiKey != null && existingApiKey.isNotEmpty) {
+                    map['api_key'] = existingApiKey;
+                  }
+
+                  await prefs.setString(key, jsonEncode(map));
+                  break;
+                }
+              } catch (_) {
+                // fallthrough
+              }
+            }
+
+            await prefs.setString(key, value);
+          }
           break;
         case 'stringList':
           if (value is List) {
@@ -166,7 +258,7 @@ class Prefs extends ChangeNotifier {
   }
 
   Color get themeColor {
-    int colorValue = prefs.getInt('themeColor') ?? Colors.blue.value;
+    final colorValue = prefs.getInt('themeColor') ?? Colors.blue.toARGB32();
     return Color(colorValue);
   }
 
@@ -617,6 +709,24 @@ class Prefs extends ChangeNotifier {
         prefs.getString('fullTextTranslateService') ?? 'microsoft');
   }
 
+  // Inline full-text translation concurrency (global).
+  // Default = 4 (previous hard-coded behavior).
+  int get inlineFullTextTranslateConcurrency {
+    final v = prefs.getInt('inlineFullTextTranslateConcurrency') ?? 4;
+    if (v < 1) return 1;
+    if (v > 8) return 8;
+    return v;
+  }
+
+  set inlineFullTextTranslateConcurrency(int value) {
+    final v = value.clamp(1, 8);
+    if (inlineFullTextTranslateConcurrency != v) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setInt('inlineFullTextTranslateConcurrency', v);
+    notifyListeners();
+  }
+
   set fullTextTranslateFrom(LangListEnum from) {
     prefs.setString('fullTextTranslateFrom', from.code);
     notifyListeners();
@@ -634,6 +744,70 @@ class Prefs extends ChangeNotifier {
   LangListEnum get fullTextTranslateTo {
     return getLang(
         prefs.getString('fullTextTranslateTo') ?? getCurrentLanguageCode());
+  }
+
+  // --- AI Translation (provider/model override) ---
+
+  static const String _aiTranslateProviderIdKey = 'aiTranslateProviderIdV1';
+  static const String _aiTranslateModelKey = 'aiTranslateModelV1';
+
+  /// AI provider id used for translation features (underline + inline full-text).
+  ///
+  /// Empty means "follow current AI chat provider".
+  String get aiTranslateProviderId {
+    return prefs.getString(_aiTranslateProviderIdKey) ?? '';
+  }
+
+  set aiTranslateProviderId(String id) {
+    final v = id.trim();
+    if (aiTranslateProviderId.trim() != v) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setString(_aiTranslateProviderIdKey, v);
+    notifyListeners();
+  }
+
+  /// Effective provider id for AI translation.
+  ///
+  /// Rules:
+  /// - If user-selected provider is enabled, use it.
+  /// - Else fallback to selectedAiService (if enabled).
+  /// - Else fallback to the first enabled provider.
+  String get aiTranslateProviderIdEffective {
+    final preferred = aiTranslateProviderId.trim();
+    if (preferred.isNotEmpty) {
+      final meta = getAiProviderMeta(preferred);
+      if (meta != null && meta.enabled) return preferred;
+    }
+
+    final fallback = selectedAiService.trim();
+    final fallbackMeta = getAiProviderMeta(fallback);
+    if (fallback.isNotEmpty && fallbackMeta != null && fallbackMeta.enabled) {
+      return fallback;
+    }
+
+    for (final p in aiProvidersV1) {
+      if (p.enabled) return p.id;
+    }
+
+    // Last resort: keep app usable even if provider list is empty/corrupt.
+    return fallback.isNotEmpty ? fallback : preferred;
+  }
+
+  /// Model id used for AI translation.
+  ///
+  /// Empty means "follow provider config".
+  String get aiTranslateModel {
+    return prefs.getString(_aiTranslateModelKey) ?? '';
+  }
+
+  set aiTranslateModel(String model) {
+    final v = model.trim();
+    if (aiTranslateModel.trim() != v) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setString(_aiTranslateModelKey, v);
+    notifyListeners();
   }
 
   // set convertChineseMode(ConvertChineseMode mode) {
@@ -799,7 +973,39 @@ class Prefs extends ChangeNotifier {
     notifyListeners();
   }
 
+  int get aiSettingsUpdatedAt {
+    return prefs.getInt('aiSettingsUpdatedAt') ?? 0;
+  }
+
+  set aiSettingsUpdatedAt(int value) {
+    prefs.setInt('aiSettingsUpdatedAt', value);
+  }
+
+  void touchAiSettingsUpdatedAt() {
+    prefs.setInt('aiSettingsUpdatedAt', DateTime.now().millisecondsSinceEpoch);
+  }
+
+  bool _safeAiConfigEquals(
+    Map<String, String> a,
+    Map<String, String> b,
+  ) {
+    final keys = <String>{...a.keys, ...b.keys};
+    for (final k in keys) {
+      if ((a[k] ?? '').trim() != (b[k] ?? '').trim()) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   void saveAiConfig(String identifier, Map<String, String> config) {
+    final before = getAiConfig(identifier);
+    final beforeSafe = Map<String, String>.from(before)..remove('api_key');
+    final afterSafe = Map<String, String>.from(config)..remove('api_key');
+    if (!_safeAiConfigEquals(beforeSafe, afterSafe)) {
+      touchAiSettingsUpdatedAt();
+    }
+
     prefs.setString('aiConfig_$identifier', jsonEncode(config));
     notifyListeners();
   }
@@ -814,6 +1020,9 @@ class Prefs extends ChangeNotifier {
   }
 
   set selectedAiService(String identifier) {
+    if ((prefs.getString('selectedAiService') ?? 'openai') != identifier) {
+      touchAiSettingsUpdatedAt();
+    }
     prefs.setString('selectedAiService', identifier);
     notifyListeners();
   }
@@ -822,13 +1031,184 @@ class Prefs extends ChangeNotifier {
     return prefs.getString('selectedAiService') ?? 'openai';
   }
 
+  // --- Provider Center (Cherry-style) ---
+
+  static const String _aiProvidersV1Key = 'aiProvidersV1';
+
+  bool get hasAiProvidersV1 => prefs.containsKey(_aiProvidersV1Key);
+
+  List<AiProviderMeta> get aiProvidersV1 {
+    final raw = prefs.getString(_aiProvidersV1Key);
+    if (raw == null || raw.trim().isEmpty) {
+      return const [];
+    }
+
+    try {
+      return AiProviderMeta.decodeList(raw);
+    } catch (e) {
+      // Corrupted value - keep app usable.
+      AnxLog.severe('Failed to decode aiProvidersV1: $e');
+      return const [];
+    }
+  }
+
+  set aiProvidersV1(List<AiProviderMeta> providers) {
+    prefs.setString(_aiProvidersV1Key, AiProviderMeta.encodeList(providers));
+    notifyListeners();
+  }
+
+  /// Initialize provider metadata storage with the given built-in providers.
+  ///
+  /// - Only runs if the key is missing or empty.
+  /// - Ensures built-ins are always present (without touching secrets).
+  void ensureAiProvidersV1Initialized({
+    required List<AiProviderMeta> builtIns,
+  }) {
+    final existing = aiProvidersV1;
+    if (existing.isEmpty) {
+      aiProvidersV1 = builtIns;
+      return;
+    }
+
+    final byId = <String, AiProviderMeta>{
+      for (final p in existing) p.id: p,
+    };
+
+    final merged = <AiProviderMeta>[];
+
+    // Keep built-ins in a stable, well-known order.
+    for (final builtIn in builtIns) {
+      final current = byId.remove(builtIn.id);
+      if (current == null) {
+        merged.add(builtIn);
+        continue;
+      }
+
+      // Refresh non-sensitive display fields, but preserve user toggles.
+      merged.add(
+        current.copyWith(
+          name: builtIn.name,
+          type: builtIn.type,
+          isBuiltIn: true,
+          logoKey: builtIn.logoKey,
+        ),
+      );
+    }
+
+    // Append remaining providers (custom) in their existing order.
+    for (final p in existing) {
+      if (byId.containsKey(p.id)) {
+        merged.add(p);
+      }
+    }
+
+    // Write back only if changed.
+    if (AiProviderMeta.encodeList(merged) !=
+        AiProviderMeta.encodeList(existing)) {
+      aiProvidersV1 = merged;
+    }
+  }
+
+  AiProviderMeta? getAiProviderMeta(String id) {
+    for (final p in aiProvidersV1) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  void upsertAiProviderMeta(AiProviderMeta meta) {
+    final existing = List<AiProviderMeta>.from(aiProvidersV1);
+    final index = existing.indexWhere((p) => p.id == meta.id);
+    if (index >= 0) {
+      existing[index] = meta;
+    } else {
+      existing.add(meta);
+    }
+    aiProvidersV1 = existing;
+  }
+
+  void deleteAiProviderMeta(String id) {
+    final existing = aiProvidersV1;
+    if (existing.isEmpty) return;
+    aiProvidersV1 = existing.where((p) => p.id != id).toList(growable: false);
+  }
+
   void deleteAiConfig(String identifier) {
+    // Removing config affects syncable settings.
+    if (prefs.containsKey('aiConfig_$identifier')) {
+      touchAiSettingsUpdatedAt();
+    }
     prefs.remove('aiConfig_$identifier');
+    // Also clear caches bound to this provider.
+    prefs.remove(_aiModelsCacheKey(identifier));
+    notifyListeners();
+  }
+
+  // --- Provider models cache (per-provider, local-only) ---
+
+  static const String _aiModelsCacheV1Prefix = 'aiModelsCacheV1_';
+
+  static String _aiModelsCacheKey(String providerId) {
+    return '$_aiModelsCacheV1Prefix$providerId';
+  }
+
+  ({int updatedAt, List<String> models})? getAiModelsCacheV1(
+      String providerId) {
+    final raw = prefs.getString(_aiModelsCacheKey(providerId));
+    if (raw == null || raw.trim().isEmpty) return null;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return null;
+      final updatedAt = decoded['updatedAt'] is int
+          ? decoded['updatedAt'] as int
+          : DateTime.now().millisecondsSinceEpoch;
+      final modelsRaw = decoded['models'];
+      if (modelsRaw is! List) return null;
+      final models = modelsRaw
+          .map((e) => e?.toString())
+          .whereType<String>()
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet()
+          .toList(growable: false)
+        ..sort();
+      return (updatedAt: updatedAt, models: models);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void saveAiModelsCacheV1(String providerId, List<String> models) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final sanitized = models
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList(growable: false)
+      ..sort();
+
+    prefs.setString(
+      _aiModelsCacheKey(providerId),
+      jsonEncode({
+        'updatedAt': now,
+        'models': sanitized,
+      }),
+    );
+    notifyListeners();
+  }
+
+  void clearAiModelsCacheV1(String providerId) {
+    prefs.remove(_aiModelsCacheKey(providerId));
     notifyListeners();
   }
 
   void saveAiPrompt(AiPrompts identifier, String prompt) {
-    prefs.setString('aiPrompt_${identifier.name}', prompt);
+    final key = 'aiPrompt_${identifier.name}';
+    if ((prefs.getString(key) ?? '') != prompt) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setString(key, prompt);
     notifyListeners();
   }
 
@@ -841,7 +1221,11 @@ class Prefs extends ChangeNotifier {
   }
 
   void deleteAiPrompt(AiPrompts identifier) {
-    prefs.remove('aiPrompt_${identifier.name}');
+    final key = 'aiPrompt_${identifier.name}';
+    if (prefs.containsKey(key)) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.remove(key);
     notifyListeners();
   }
 
@@ -928,6 +1312,7 @@ class Prefs extends ChangeNotifier {
   }
 
   set userPrompts(List<UserPrompt> prompts) {
+    touchAiSettingsUpdatedAt();
     final jsonList = prompts.map((p) => p.toJson()).toList();
     prefs.setString(_userPromptsKey, jsonEncode(jsonList));
     notifyListeners();
@@ -1065,7 +1450,8 @@ class Prefs extends ChangeNotifier {
   }
 
   bool get bottomNavigatorShowNote {
-    return prefs.getBool('bottomNavigatorShowNote') ?? true;
+    // Default: hidden (new default UX).
+    return prefs.getBool('bottomNavigatorShowNote') ?? false;
   }
 
   set bottomNavigatorShowStatistics(bool status) {
@@ -1074,7 +1460,8 @@ class Prefs extends ChangeNotifier {
   }
 
   bool get bottomNavigatorShowStatistics {
-    return prefs.getBool('bottomNavigatorShowStatistics') ?? true;
+    // Default: hidden (new default UX).
+    return prefs.getBool('bottomNavigatorShowStatistics') ?? false;
   }
 
   bool get bottomNavigatorShowAI {
@@ -1083,6 +1470,190 @@ class Prefs extends ChangeNotifier {
 
   set bottomNavigatorShowAI(bool status) {
     prefs.setBool('bottomNavigatorShowAI', status);
+    notifyListeners();
+  }
+
+  // --- Home tabs config (order + enable) ---
+
+  void _migrateHomeTabsIfNeeded() {
+    final v = prefs.getInt(_homeTabsSchemaVersionKey);
+    final hasOrder = prefs.getStringList(_homeTabsOrderKey) != null;
+    final hasEnabled = prefs.getString(_homeTabsEnabledKey) != null;
+
+    if (v == _homeTabsSchemaVersion && hasOrder && hasEnabled) {
+      return;
+    }
+
+    // Migrate from legacy bottom navigator switches.
+    // New default UX: Statistics + Notes are hidden unless the user explicitly
+    // enabled them (legacy prefs present).
+    final legacyShowStatistics =
+        prefs.getBool('bottomNavigatorShowStatistics') ?? false;
+    final legacyShowAI = prefs.getBool('bottomNavigatorShowAI') ?? true;
+    final legacyShowNotes = prefs.getBool('bottomNavigatorShowNote') ?? false;
+
+    final defaultOrder = <String>[
+      homeTabPapers,
+      homeTabBookshelf,
+      homeTabStatistics,
+      homeTabAI,
+      homeTabNotes,
+      homeTabSettings,
+    ];
+
+    final enabled = <String, bool>{
+      homeTabPapers: true,
+      homeTabBookshelf: true,
+      homeTabStatistics: legacyShowStatistics,
+      homeTabAI: legacyShowAI,
+      homeTabNotes: legacyShowNotes,
+      homeTabSettings: true,
+    };
+
+    prefs.setInt(_homeTabsSchemaVersionKey, _homeTabsSchemaVersion);
+    prefs.setStringList(_homeTabsOrderKey, defaultOrder);
+    prefs.setString(_homeTabsEnabledKey, jsonEncode(enabled));
+  }
+
+  List<String> _normalizeHomeTabsOrder(List<String> raw) {
+    final out = <String>[];
+    final seen = <String>{};
+
+    for (final id in raw) {
+      if (!_homeTabAll.contains(id)) continue;
+      if (seen.contains(id)) continue;
+      seen.add(id);
+      out.add(id);
+    }
+
+    // Ensure mandatory tabs exist even if the config is corrupted.
+    if (!seen.contains(homeTabPapers)) {
+      out.insert(0, homeTabPapers);
+      seen.add(homeTabPapers);
+    }
+    if (!seen.contains(homeTabSettings)) {
+      out.add(homeTabSettings);
+      seen.add(homeTabSettings);
+    }
+
+    // Append any newly added tabs.
+    for (final id in _homeTabAll) {
+      if (!seen.contains(id)) out.add(id);
+    }
+
+    return out;
+  }
+
+  Map<String, bool> _normalizeHomeTabsEnabled(Map<String, bool> raw) {
+    final out = <String, bool>{};
+    for (final id in _homeTabAll) {
+      out[id] = raw[id] ?? true;
+    }
+    // Mandatory tabs cannot be disabled.
+    for (final id in _homeTabMandatory) {
+      out[id] = true;
+    }
+    return out;
+  }
+
+  void _normalizeAndPersistHomeTabsConfig() {
+    final order = _normalizeHomeTabsOrder(
+        prefs.getStringList(_homeTabsOrderKey) ?? const []);
+
+    Map<String, bool> enabled;
+    final enabledStr = prefs.getString(_homeTabsEnabledKey);
+    if (enabledStr == null || enabledStr.trim().isEmpty) {
+      enabled = <String, bool>{};
+    } else {
+      try {
+        final dynamic decoded = jsonDecode(enabledStr);
+        if (decoded is Map) {
+          enabled = decoded
+              .map((key, value) => MapEntry(key.toString(), value == true));
+        } else {
+          enabled = <String, bool>{};
+        }
+      } catch (_) {
+        enabled = <String, bool>{};
+      }
+    }
+
+    final enabledNormalized = _normalizeHomeTabsEnabled(enabled);
+
+    prefs.setInt(_homeTabsSchemaVersionKey, _homeTabsSchemaVersion);
+    prefs.setStringList(_homeTabsOrderKey, order);
+    prefs.setString(_homeTabsEnabledKey, jsonEncode(enabledNormalized));
+  }
+
+  List<String> get homeTabsOrder {
+    return _normalizeHomeTabsOrder(
+        prefs.getStringList(_homeTabsOrderKey) ?? const []);
+  }
+
+  Map<String, bool> get homeTabsEnabled {
+    final enabledStr = prefs.getString(_homeTabsEnabledKey);
+    Map<String, bool> enabled;
+    if (enabledStr == null || enabledStr.trim().isEmpty) {
+      enabled = <String, bool>{};
+    } else {
+      try {
+        final dynamic decoded = jsonDecode(enabledStr);
+        if (decoded is Map) {
+          enabled = decoded
+              .map((key, value) => MapEntry(key.toString(), value == true));
+        } else {
+          enabled = <String, bool>{};
+        }
+      } catch (_) {
+        enabled = <String, bool>{};
+      }
+    }
+    return _normalizeHomeTabsEnabled(enabled);
+  }
+
+  void setHomeTabsOrder(List<String> order) {
+    final normalized = _normalizeHomeTabsOrder(order);
+    prefs.setStringList(_homeTabsOrderKey, normalized);
+    notifyListeners();
+  }
+
+  void setHomeTabEnabled(String tabId, bool enabled) {
+    final map0 = Map<String, bool>.from(homeTabsEnabled);
+    if (_homeTabMandatory.contains(tabId)) {
+      map0[tabId] = true;
+    } else {
+      map0[tabId] = enabled;
+    }
+    final normalized = _normalizeHomeTabsEnabled(map0);
+    prefs.setString(_homeTabsEnabledKey, jsonEncode(normalized));
+    notifyListeners();
+  }
+
+  void resetHomeTabsConfigToDefault() {
+    final defaultOrder = <String>[
+      homeTabPapers,
+      homeTabBookshelf,
+      homeTabStatistics,
+      homeTabAI,
+      homeTabNotes,
+      homeTabSettings,
+    ];
+
+    // Reset to the current *default* UX.
+    // Notes + Statistics are hidden by default.
+    final enabled = <String, bool>{
+      homeTabPapers: true,
+      homeTabBookshelf: true,
+      homeTabStatistics: false,
+      homeTabAI: true,
+      homeTabNotes: false,
+      homeTabSettings: true,
+    };
+
+    prefs.setInt(_homeTabsSchemaVersionKey, _homeTabsSchemaVersion);
+    prefs.setStringList(_homeTabsOrderKey, defaultOrder);
+    prefs.setString(
+        _homeTabsEnabledKey, jsonEncode(_normalizeHomeTabsEnabled(enabled)));
     notifyListeners();
   }
 
@@ -1474,7 +2045,138 @@ class Prefs extends ChangeNotifier {
   }
 
   set aiPanelPosition(AiPanelPositionEnum position) {
+    if ((prefs.getString('aiPanelPosition') ?? 'right') != position.code) {
+      touchAiSettingsUpdatedAt();
+    }
     prefs.setString('aiPanelPosition', position.code);
+    notifyListeners();
+  }
+
+  /// AI panel width (dock mode)
+  double get aiPanelWidth {
+    return prefs.getDouble('aiPanelWidth') ?? 300;
+  }
+
+  set aiPanelWidth(double width) {
+    if ((prefs.getDouble('aiPanelWidth') ?? 300) != width) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setDouble('aiPanelWidth', width);
+    notifyListeners();
+  }
+
+  /// AI panel height (dock mode when positioned at bottom)
+  double get aiPanelHeight {
+    return prefs.getDouble('aiPanelHeight') ?? 300;
+  }
+
+  set aiPanelHeight(double height) {
+    if ((prefs.getDouble('aiPanelHeight') ?? 300) != height) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setDouble('aiPanelHeight', height);
+    notifyListeners();
+  }
+
+  /// Initial height of AI chat bottom sheet (0-1, relative to screen height).
+  double get aiSheetInitialSize {
+    return prefs.getDouble('aiSheetInitialSize') ?? 0.6;
+  }
+
+  set aiSheetInitialSize(double size) {
+    if ((prefs.getDouble('aiSheetInitialSize') ?? 0.6) != size) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setDouble('aiSheetInitialSize', size);
+    notifyListeners();
+  }
+
+  /// Font scale for AI chat UI (markdown + input). 1.0 = system default.
+  double get aiChatFontScale {
+    return prefs.getDouble('aiChatFontScale') ?? 1.0;
+  }
+
+  /// AI dev mode diagnostic logging.
+  ///
+  /// When enabled, extra AI streaming / tool calling debug logs will be written
+  /// to the app log file (Settings -> Advanced -> Log).
+  bool get aiDebugLogsEnabled {
+    return prefs.getBool('aiDebugLogsEnabled') ?? false;
+  }
+
+  set aiDebugLogsEnabled(bool enabled) {
+    if ((prefs.getBool('aiDebugLogsEnabled') ?? false) != enabled) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setBool('aiDebugLogsEnabled', enabled);
+    notifyListeners();
+  }
+
+  set aiChatFontScale(double scale) {
+    if ((prefs.getDouble('aiChatFontScale') ?? 1.0) != scale) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setDouble('aiChatFontScale', scale);
+    notifyListeners();
+  }
+
+  /// Configurable quick prompts shown in AI chat input area.
+  /// Returns default prompts (localized) if never customized.
+  List<AiInputQuickPrompt> get aiInputQuickPrompts {
+    final stored = prefs.getString('aiInputQuickPrompts');
+    if (stored != null && stored.isNotEmpty) {
+      final list = AiInputQuickPrompt.fromJsonList(stored);
+      if (list.isNotEmpty) return list;
+    }
+    // Return empty list; AiChatStream will use localized defaults.
+    return [];
+  }
+
+  set aiInputQuickPrompts(List<AiInputQuickPrompt> prompts) {
+    touchAiSettingsUpdatedAt();
+    prefs.setString(
+        'aiInputQuickPrompts', AiInputQuickPrompt.toJsonList(prompts));
+    notifyListeners();
+  }
+
+  /// Whether user has customized quick prompts (used to decide seeding).
+  bool get hasCustomAiInputQuickPrompts {
+    return prefs.containsKey('aiInputQuickPrompts');
+  }
+
+  /// Clear custom quick prompts to revert to defaults.
+  void clearAiInputQuickPrompts() {
+    if (prefs.containsKey('aiInputQuickPrompts')) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.remove('aiInputQuickPrompts');
+    notifyListeners();
+  }
+
+  /// iPad AI panel mode: dock (split panel) or bottomSheet.
+  AiPadPanelModeEnum get aiPadPanelMode {
+    return AiPadPanelModeEnum.fromCode(
+        prefs.getString('aiPadPanelMode') ?? 'dock');
+  }
+
+  set aiPadPanelMode(AiPadPanelModeEnum mode) {
+    if ((prefs.getString('aiPadPanelMode') ?? 'dock') != mode.code) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setString('aiPadPanelMode', mode.code);
+    notifyListeners();
+  }
+
+  /// AI panel dock side when in dock mode (left or right). Affects iPad primarily.
+  AiDockSideEnum get aiDockSide {
+    return AiDockSideEnum.fromCode(prefs.getString('aiDockSide') ?? 'right');
+  }
+
+  set aiDockSide(AiDockSideEnum side) {
+    if ((prefs.getString('aiDockSide') ?? 'right') != side.code) {
+      touchAiSettingsUpdatedAt();
+    }
+    prefs.setString('aiDockSide', side.code);
     notifyListeners();
   }
 

@@ -7,6 +7,7 @@ import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/page/home_page/ai_page.dart';
 import 'package:anx_reader/service/initialization_check.dart';
 import 'package:anx_reader/page/home_page/bookshelf_page.dart';
+import 'package:anx_reader/page/home_page/papers_page.dart';
 import 'package:anx_reader/page/home_page/notes_page.dart';
 import 'package:anx_reader/page/home_page/settings_page.dart';
 import 'package:anx_reader/page/home_page/statistics_page.dart';
@@ -44,7 +45,7 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  String _currentTab = 'bookshelf';
+  String _currentTab = Prefs.homeTabPapers;
 
   bool? _expanded;
 
@@ -130,42 +131,79 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   @override
   Widget build(BuildContext context) {
-    List<Map<String, dynamic>> navBarItems = [
-      {
+    final homeOrder = Prefs().homeTabsOrder;
+    final homeEnabled = Prefs().homeTabsEnabled;
+
+    final defs = <String, Map<String, dynamic>>{
+      Prefs.homeTabPapers: {
+        'icon': Icons.article_outlined,
+        'label': L10n.of(context).navBarPapers,
+        'identifier': Prefs.homeTabPapers,
+      },
+      Prefs.homeTabBookshelf: {
         'icon': EvaIcons.book_open,
         'label': L10n.of(context).navBarBookshelf,
-        'identifier': 'bookshelf'
+        'identifier': Prefs.homeTabBookshelf,
       },
-      if (Prefs().bottomNavigatorShowStatistics)
-        {
-          'icon': Icons.show_chart,
-          'label': L10n.of(context).navBarStatistics,
-          'identifier': 'statistics'
-        },
-      if (Prefs().bottomNavigatorShowAI && EnvVar.enableAIFeature)
-        {
-          'icon': Icons.auto_awesome,
-          'label': L10n.of(context).navBarAI,
-          'identifier': 'ai'
-        },
-      if (Prefs().bottomNavigatorShowNote)
-        {
-          'icon': Icons.note,
-          'label': L10n.of(context).navBarNotes,
-          'identifier': 'notes'
-        },
-      {
+      Prefs.homeTabStatistics: {
+        'icon': Icons.show_chart,
+        'label': L10n.of(context).navBarStatistics,
+        'identifier': Prefs.homeTabStatistics,
+      },
+      Prefs.homeTabAI: {
+        'icon': Icons.auto_awesome,
+        'label': L10n.of(context).navBarAI,
+        'identifier': Prefs.homeTabAI,
+      },
+      Prefs.homeTabNotes: {
+        'icon': Icons.note,
+        'label': L10n.of(context).navBarNotes,
+        'identifier': Prefs.homeTabNotes,
+      },
+      Prefs.homeTabSettings: {
         'icon': EvaIcons.settings_2,
         'label': L10n.of(context).navBarSettings,
-        'identifier': 'settings'
+        'identifier': Prefs.homeTabSettings,
       },
-    ];
+    };
+
+    final List<Map<String, dynamic>> navBarItems = [];
+    for (final id in homeOrder) {
+      if (!(homeEnabled[id] ?? true)) continue;
+      if (id == Prefs.homeTabAI && !EnvVar.enableAIFeature) continue;
+      final def = defs[id];
+      if (def != null) navBarItems.add(def);
+    }
 
     int currentIndex = navBarItems
         .indexWhere((element) => element['identifier'] == _currentTab);
     if (currentIndex == -1) {
-      currentIndex = 0;
-      _currentTab = 'bookshelf';
+      _currentTab = Prefs.homeTabPapers;
+      currentIndex = navBarItems
+          .indexWhere((element) => element['identifier'] == _currentTab);
+      if (currentIndex == -1 && navBarItems.isNotEmpty) {
+        currentIndex = 0;
+        _currentTab = navBarItems[0]['identifier'];
+      }
+    }
+
+    Widget pageFor(String id, ScrollController? controller) {
+      switch (id) {
+        case Prefs.homeTabPapers:
+          return PapersPage(controller: controller);
+        case Prefs.homeTabBookshelf:
+          return BookshelfPage(controller: controller);
+        case Prefs.homeTabStatistics:
+          return StatisticPage(controller: controller);
+        case Prefs.homeTabAI:
+          return AiChatStream();
+        case Prefs.homeTabNotes:
+          return NotesPage(controller: controller);
+        case Prefs.homeTabSettings:
+          return SettingsPage(controller: controller);
+        default:
+          return BookshelfPage(controller: controller);
+      }
     }
 
     Widget pages(
@@ -173,21 +211,13 @@ class _HomePageState extends ConsumerState<HomePage> {
       BoxConstraints constraints,
       ScrollController? controller,
     ) {
-      final page = [
-        BookshelfPage(controller: controller),
-        if (Prefs().bottomNavigatorShowStatistics)
-          StatisticPage(controller: controller),
-        if (Prefs().bottomNavigatorShowAI && EnvVar.enableAIFeature)
-          AiChatStream(),
-        if (Prefs().bottomNavigatorShowNote) NotesPage(controller: controller),
-        SettingsPage(controller: controller),
-      ];
-      return page[index];
+      final id = navBarItems[index]['identifier'] as String;
+      return pageFor(id, controller);
     }
 
     void onBottomTap(int index, bool fromRail) {
       VibrationService.heavy();
-      if (navBarItems[index]['identifier'] == 'ai' && !fromRail) {
+      if (navBarItems[index]['identifier'] == Prefs.homeTabAI && !fromRail) {
         showCupertinoSheet(
             context: context, builder: (context) => const AiPage());
         return;
@@ -261,8 +291,11 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
           );
         } else {
-          if (navBarItems[currentIndex]['identifier'] == 'ai') {
-            currentIndex = 0;
+          if (navBarItems.isNotEmpty &&
+              navBarItems[currentIndex]['identifier'] == Prefs.homeTabAI) {
+            final fallbackIndex = navBarItems
+                .indexWhere((e) => e['identifier'] != Prefs.homeTabAI);
+            currentIndex = fallbackIndex == -1 ? 0 : fallbackIndex;
           }
           return Scaffold(
             extendBody: true,

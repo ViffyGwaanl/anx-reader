@@ -1,6 +1,7 @@
 import 'package:anx_reader/config/shared_preference_provider.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/page/settings_page/ai.dart';
+import 'package:anx_reader/page/settings_page/ai_provider_center/ai_provider_center_page.dart';
 import 'package:anx_reader/page/settings_page/advanced.dart';
 import 'package:anx_reader/page/settings_page/appearance.dart';
 import 'package:anx_reader/page/settings_page/developer/developer_options_page.dart';
@@ -118,16 +119,25 @@ class _SubMoreSettingsState extends State<SubMoreSettings> {
                   L10n.of(context).settingsTranslate,
                 ],
               },
-              if (EnvVar.enableAIFeature)
+              if (EnvVar.enableAIFeature) ...[
                 {
                   "title": L10n.of(context).settingsAi,
                   "icon": Icons.auto_awesome,
                   "sections": const AISettings(),
                   "subtitles": [
-                    L10n.of(context).settingsAiServices,
                     L10n.of(context).settingsAiPrompt,
+                    L10n.of(context).settingsAiTools,
                   ],
                 },
+                {
+                  "title": L10n.of(context).settingsAiProviderCenterTitle,
+                  "icon": Icons.hub_outlined,
+                  "sections": const AiProviderCenterPage(),
+                  "subtitles": [
+                    L10n.of(context).settingsAiProviderCenterDesc,
+                  ],
+                },
+              ],
               {
                 "title": L10n.of(context).storage,
                 "icon": Icons.storage_outlined,

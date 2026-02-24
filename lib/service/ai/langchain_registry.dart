@@ -1,21 +1,25 @@
 import 'dart:io';
 
 import 'package:anx_reader/config/shared_preference_provider.dart';
+import 'package:anx_reader/enums/ai_thinking_mode.dart';
 import 'package:anx_reader/providers/current_reading.dart';
 import 'package:anx_reader/service/ai/tools/ai_tool_registry.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod/riverpod.dart';
 import 'package:langchain_anthropic/langchain_anthropic.dart';
 import 'package:langchain_core/chat_models.dart';
 import 'package:langchain_core/tools.dart';
 import 'package:langchain_google/langchain_google.dart';
 import 'package:langchain_openai/langchain_openai.dart';
 
+import 'gemini_chat_with_thinking.dart';
+import 'openai_responses_chat_model.dart';
+
 import 'langchain_ai_config.dart';
 
 /// Factory responsible for building chat models based on user preferences.
 class LangchainAiRegistry {
   const LangchainAiRegistry(this.ref);
-  final WidgetRef? ref;
+  final Ref? ref;
 
   LangchainPipeline resolve(
     LangchainAiConfig config, {
@@ -32,6 +36,12 @@ class LangchainAiRegistry {
         return _buildPipeline(
           config,
           _buildGoogle(config),
+          useAgent: useAgent,
+        );
+      case 'openai-responses':
+        return _buildPipeline(
+          config,
+          _buildOpenAiResponses(config),
           useAgent: useAgent,
         );
       case 'deepseek':
@@ -55,6 +65,25 @@ class LangchainAiRegistry {
     );
   }
 
+  BaseChatModel _buildOpenAiResponses(LangchainAiConfig config) {
+    // For Responses API, we treat `auto` as a reasonable default effort.
+    // This affects request-side behavior only.
+    final defaultOptions = config.toOpenAIOptions();
+    final patchedOptions = (config.thinkingMode == AiThinkingMode.auto &&
+            defaultOptions.reasoningEffort == null)
+        ? defaultOptions.copyWith(
+            reasoningEffort: ChatOpenAIReasoningEffort.medium,
+          )
+        : defaultOptions;
+
+    return ChatOpenAIResponses(
+      apiKey: config.apiKey,
+      baseUrl: config.baseUrl ?? 'https://api.openai.com/v1',
+      headers: config.headers.isEmpty ? null : config.headers,
+      defaultOptions: patchedOptions,
+    );
+  }
+
   BaseChatModel _buildAnthropic(LangchainAiConfig config) {
     return ChatAnthropic(
       apiKey: config.apiKey.isEmpty ? null : config.apiKey,
@@ -65,11 +94,13 @@ class LangchainAiRegistry {
   }
 
   BaseChatModel _buildGoogle(LangchainAiConfig config) {
-    return ChatGoogleGenerativeAI(
+    return ChatGoogleGenerativeAIWithThinking(
       apiKey: config.apiKey.isEmpty ? null : config.apiKey,
       baseUrl: config.baseUrl,
       headers: config.headers.isEmpty ? null : config.headers,
       defaultOptions: config.toGoogleOptions(),
+      thinkingMode: config.thinkingMode,
+      includeThoughts: config.includeThoughts,
     );
   }
 

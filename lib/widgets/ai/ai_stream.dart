@@ -46,13 +46,20 @@ class AiStreamState extends ConsumerState<AiStream> {
 
   Stream<String> _createStream(bool regenerate) {
     final messages = widget.prompt.buildMessages();
+
+    // AiStream is used in dialogs/settings/translation. Keep it lightweight and
+    // decoupled from reading-page tools.
+    assert(
+      !widget.useAgent,
+      'AiStream does not support agent/tool mode. Use AiChat instead.',
+    );
+
     return aiGenerateStream(
       messages,
       identifier: widget.identifier,
       config: widget.config,
       regenerate: regenerate,
-      useAgent: widget.useAgent,
-      ref: ref,
+      useAgent: false,
     );
   }
 

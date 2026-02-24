@@ -1,90 +1,112 @@
-# AI Panel UX / Config / Sync — Design Notes
+# AI Panel UX / Config / Sync — Design & Implementation Notes
 
-> Maintainer note (fork): this folder documents the UX/config improvements planned for the Anx Reader AI chat panel, with a strong focus on iPad split-panel ergonomics.
+> Maintainer note (fork): This folder documents the AI-related UX/config/sync improvements for the Anx Reader fork, with a strong focus on iPad reading ergonomics and “Cherry-style” provider/chat UX.
 
 ## Scope
 
-### Done / Implemented (fork)
+### Implemented (fork, `feat/ai-all-in-one`)
 
-- iPad AI panel (dock split view): resize via touch + persist size
-- iPad: optional iPhone-style bottom sheet (now fixed large size; legacy resizable implementation exists)
-- iPad: dock side switch (left/right) and gesture conflict mitigation with TOC drawer
-- AI chat: font scale control
-- AI chat input: configurable quick prompts chips
-- Increase user prompt max length (target 20,000 chars)
-- WebDAV sync of AI settings (excluding API keys)
-- Manual backup/restore via Files/iCloud Drive (directional overwrite) with optional encrypted API key
+#### Reading-page AI panel UX (iPad/iPhone)
 
-### Planned / Next (fork)
+- iPad dock split panel: **touch-friendly resize** + **persist** width/height
+- iPad: panel mode setting (dock vs bottom sheet)
+- iPad: dock side switch (left/right) + TOC drawer gesture mitigation
+- iPhone/iPad bottom-sheet mode:
+  - `DraggableScrollableSheet` with snap points
+  - can **minimize** to a small bar (keep reading)
+  - open defaults to expanded on reading page
+- Streaming UX:
+  - **minimize instead of dismiss** (supports “keep generating while reading”)
+  - open does **not** auto-scroll to bottom
+  - streaming auto-scroll only when user is pinned near bottom
 
-- AI provider configuration UX redesign (Cherry-style UX, Flutter-native reimplementation)
-- AI translation improvements:
-  - split prompts for selection-translation vs full-text translation (full-text should output *clean translation only*)
-  - PDF translation UX hardening (text-layer limitations)
-- PDF AI improvements:
-  - outline-based “chapter” extraction (page-range) when outline exists
-  - fallback page-window context when outline missing
-  - optional OCR via MinerU for scanned PDFs (cache + AI tool fallback)
-- “Ask about the whole book” quality improvements:
-  - keyword search + snippet aggregation (Phase 1)
-  - optional embeddings + rerank (Phase 2, larger scope)
+#### Chat UX (Cherry-inspired, Flutter-native)
 
-## PR Stack / Status (fork)
+- Provider Center (top-level settings entry)
+  - built-in providers + custom providers
+  - in-chat provider/model switching
+- “Thinking level” (档位) selector (Cherry-style lightbulb UI)
+- Gemini thinking support: `includeThoughts` toggle (default ON)
+- Thinking/Answer/Tools sections: collapsible display
+- Editable chat history + regenerate from any user turn
+- Per-turn assistant variants (left/right switch)
+- Conversation tree v2 (`conversationV2`) with rollback via per-message variant switcher
 
-> Branches (top = newest). Note that some PRs may have a “work branch” and a “squashed branch” for upstream review.
-> 
-> Additional context: we checked recent work history in `memory/2026-02-13.md` (PR-1..5) and the repo docs branches.
+#### Config / Sync / Backup
 
-- PR-8: `feat/ui-fixes`
-  - AI chat font scale UI: use a stable dialog (avoid sheet-on-sheet auto-dismiss)
-  - iOS/iPad bottom-sheet AI: **fixed large height** (remove hard-to-control resize)
-  - Reading page: swipe up from the lower-middle area to open AI bottom sheet
-  - Fix 1px red `bottom overflowed by 1.00 pixels` on bookshelf cards
-  - iOS build metadata: Runner `CURRENT_PROJECT_VERSION` follows `$(FLUTTER_BUILD_NUMBER)`
-- PR-7: `feat/backup-restore-encrypted-api-key-squashed`
-  - Backup v4 ZIP + `manifest.json`
-  - Optional encrypted API key inclusion (password-based)
-  - Import confirmation + safe rollback via `.bak.<timestamp>`
-- PR-6: `feat/ai-settings-webdav-sync`
-  - WebDAV sync of `anx/config/ai_settings.json`
-  - Whole-file timestamp newer-wins; **api_key excluded**
-- PR-5: `feat/ai-quick-prompts-config` — configurable input quick prompts + prompt max length 20k
-- PR-4: `feat/ai-chat-font-scale` — font scale slider (markdown + input)
-- PR-3: `feat/ipad-ai-panel-mode-dock-side` — iPad panel mode (dock/bottomSheet) + dock side left/right
-- PR-2: `feat/ai-bottom-sheet-resizable` — (superseded in PR-8) resizable bottom sheet + snap points + persist height
-- PR-1: `feat/ipad-ai-panel-resize-persist` — dock resize handle (16px) + persist width/height
+- Configurable input quick prompts chips
+- User prompt editor maxLength raised to **20,000**
+- WebDAV sync of AI settings snapshot (**excluding api_key**) with timestamp newer-wins
+- Files/iCloud manual backup/restore:
+  - directional overwrite options
+  - optional **encrypted API key** inclusion (password-based)
+  - rollback-safe import
 
-## Roadmap (planned)
+#### OpenAI-compatible “thinking content” compatibility
 
-> These are proposed next PRs/branches. Names may change.
+- If an OpenAI-compatible backend returns `reasoning_content` (or `reasoning`) in responses/stream deltas, the fork maps it to the app’s `<think>...</think>` channel so it shows inside the Thinking section.
 
-- PR-9 (planned): AI provider configuration UX refactor
-  - Cherry-style UX, Flutter-native implementation (no code reuse)
-  - advanced fields: headers/temperature/top_p/max_tokens
-  - optional: multiple OpenAI-compatible providers (custom entries)
-- PR-10 (planned): AI translation UX hardening
-  - split prompts: selection translate vs full-text translate
-  - PDF translation guidance / safe fallback
-- PR-11 (planned): PDF “chapter” extraction improvements for AI tools
-  - outline-based page-range chapter content
-  - fallback page-window content when outline missing
-- PR-12 (planned): MinerU OCR integration for scanned PDFs
-  - cache + status tracking + AI tool fallback
-- PR-13 (planned): whole-book Q&A quality improvements
-  - keyword search + snippet aggregation (Phase 1)
-  - optional embeddings + rerank (Phase 2)
+---
+
+## Other modules (fork)
+
+- [PaperTok (papers feed) — UX + import behavior](../papertok/README.md)
+
+## Architecture Notes (important)
+
+### Provider-managed streaming (root-cause fix)
+
+**Problem:** when streaming is owned by a Widget (`StreamSubscription` in the UI), any UI lifecycle change (bottom sheet minimize/rebuild, scrollController swap, route changes) can interrupt generation.
+
+**Fix:** streaming is moved into `aiChatProvider` (keepAlive) and the UI becomes a pure renderer:
+
+- `aiChatProvider.notifier.startStreaming(...)`
+- `aiChatProvider.notifier.cancelStreaming()`
+- `aiChatStreamingProvider` exposes streaming state for UI (send/stop button, disabling edits, etc.)
+
+This is the “root-cause” solution for “minimize/close should not interrupt generation”.
+
+### Tooling / agent mode dependency on Riverpod `Ref`
+
+To allow provider-owned agent streaming (reading tools), tool code paths now accept **Riverpod core `Ref`** (not Flutter-only `WidgetRef`).
+
+---
+
+## Branch / PR Stack (fork)
+
+Primary integration branch for local install + iPhone/iPad testing:
+
+- `feat/ai-all-in-one`
+
+This branch includes all AI-related changes (PR-1..7 line + Provider Center/chat UX stack + reading-page UX fixes).
+
+---
 
 ## Documents
 
+- [AI 改造：已完成 & 路线图（中文）](./ai_status_roadmap_zh.md)
+- [P1：OpenAI-compatible Thinking（仅展示供应商数据，无兜底）（中文）](./ai_thinking_openai_provider_only_zh.md)
 - [AI panel UX tech design](./ai_panel_ux_tech_design.md)
+- [AI provider config UX (Provider Center)](./ai_provider_config_ux.md)
 - [AI settings sync (WebDAV) tech design](./ai_settings_sync_webdav.md)
 - [Backup/restore (Files/iCloud) tech design](./backup_restore_icloud.md)
-- [AI provider config UX redesign](./ai_provider_config_ux.md)
 - [PDF AI chaptering & OCR (MinerU) design](./pdf_ai_chaptering_and_ocr.md)
 - [AI translation design notes](./ai_translation_design.md)
 - [iOS TestFlight build notes](./ios_testflight_build.md)
 - [Test plan](./test_plan.md)
 - [Implementation plan](./implementation_plan.md)
-- [PR-6 draft](./pr_pr6_webdav_ai_settings.md)
-- [PR-7 draft](./pr_pr7_backup_v4_encrypted_keys.md)
 - [Release/Migration notes](./release_notes_migration_ai_sync_backup.md)
+
+---
+
+## Developer Notes
+
+### Codegen requirements
+
+This repo ignores generated files (e.g. `*.g.dart`, `*.freezed.dart`, `lib/gen/`). After pulling branches/PRs, regenerate:
+
+```bash
+flutter pub get
+flutter gen-l10n
+dart run build_runner build --delete-conflicting-outputs
+```

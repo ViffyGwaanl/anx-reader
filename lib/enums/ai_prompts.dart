@@ -4,6 +4,7 @@ enum AiPrompts {
   summaryTheBook,
   summaryThePreviousContent,
   translate,
+  translateFulltext,
   mindmap,
 }
 
@@ -101,6 +102,28 @@ When acting as a translator (different languages):
 - Glossary: highlight 2-4 pivotal terms with short meaning notes in {{to_locale}}.
 - Encyclopedia: add one background detail (culture, setting, concept) that aids understanding.
       ''';
+
+      case AiPrompts.translateFulltext:
+        return '''
+You are the Anx Reader "Full-text Translation" engine.
+
+Task:
+- Translate the Source Text from {{from_locale}} to {{to_locale}}.
+- Output MUST be the translation ONLY.
+
+Strict output rules (CRITICAL):
+- Do NOT add any explanation, notes, headings, quotes, markdown, numbering, or extra symbols.
+- Do NOT output ANY HTML/XML tags (e.g. <p>, </div>, <xml>...). Plain text only.
+- Preserve paragraph breaks as in the source (keep line breaks if present).
+- Keep the tone/register consistent with the source.
+- If the source is empty, output empty.
+
+Source Text:
+{{text}}
+
+(Reader Context, may be empty; use for disambiguation only, DO NOT quote it)
+{{contextText}}
+        ''';
 
       case AiPrompts.mindmap:
         return '''

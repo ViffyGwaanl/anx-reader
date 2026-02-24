@@ -5,6 +5,7 @@ import 'package:anx_reader/enums/lang_list.dart';
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/service/config/config_item.dart';
 import 'package:anx_reader/service/translate/ai.dart';
+import 'package:anx_reader/service/translate/ai_fulltext.dart';
 import 'package:anx_reader/service/translate/deepl.dart';
 import 'package:anx_reader/service/translate/google_api.dart';
 import 'package:anx_reader/service/translate/microsoft.dart';
@@ -22,6 +23,7 @@ enum TranslateService {
   googleApi,
   deepl,
   ai,
+  aiFullText,
   microsoft;
 
   TranslateServiceProvider get provider {
@@ -38,6 +40,8 @@ enum TranslateService {
         return DeepLTranslateProvider();
       case TranslateService.ai:
         return AiTranslateProvider();
+      case TranslateService.aiFullText:
+        return AiFullTextTranslateProvider();
       case TranslateService.microsoft:
         return MicrosoftTranslateProvider();
     }
@@ -50,8 +54,21 @@ enum TranslateService {
   bool get isWebView => provider is WebViewTranslateProvider;
 
   static List<TranslateService> get activeValues => values
-      .where((e) => e != TranslateService.ai || EnvVar.enableAIFeature)
+      .where((e) =>
+          (e != TranslateService.ai && e != TranslateService.aiFullText) ||
+          EnvVar.enableAIFeature)
       .toList();
+
+  /// Services allowed for selection / highlight translation.
+  ///
+  /// We intentionally hide [TranslateService.aiFullText] here because it is
+  /// dedicated for inline full-text translation and must use a different prompt.
+  static List<TranslateService> get activeValuesForSelection => activeValues
+      .where((e) => e != TranslateService.aiFullText)
+      .toList(growable: false);
+
+  /// Services allowed for inline full-text translation.
+  static List<TranslateService> get activeValuesForFullText => activeValues;
 }
 
 TranslateService getTranslateService(String name) {
@@ -108,6 +125,8 @@ abstract class TranslateServiceProvider {
     for (int attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         String? lastResult;
+        String? lastNonPlaceholder;
+
         await for (String result in translateStream(
           text,
           from,
@@ -116,16 +135,22 @@ abstract class TranslateServiceProvider {
         )) {
           lastResult = result;
           if (result != '...' && result.trim().isNotEmpty) {
-            return result;
+            lastNonPlaceholder = result;
           }
         }
 
+        if (lastNonPlaceholder != null) {
+          return lastNonPlaceholder;
+        }
+
         throw Exception(
-            'Translation returned no valid result: ${lastResult ?? 'No result'}');
+          'Translation returned no valid result: ${lastResult ?? 'No result'}',
+        );
       } catch (e) {
         if (attempt < maxRetries) {
           AnxLog.warning(
-              'Translation attempt ${attempt + 1} failed with exception: $e. Retrying...');
+            'Translation attempt ${attempt + 1} failed with exception: $e. Retrying...',
+          );
           await Future.delayed(Duration(milliseconds: 100 * (attempt + 1)));
           continue;
         } else {
@@ -188,7 +213,8 @@ abstract class TranslateServiceProvider {
 
 Widget translateText(String text,
     {TranslateService? service, String? contextText}) {
-  service ??= Prefs().translateService;
+  // Settings UI has been simplified to AI-only translation.
+  service ??= TranslateService.ai;
   final from = Prefs().translateFrom;
   final to = Prefs().translateTo;
 
@@ -216,7 +242,8 @@ void saveTranslateServiceConfig(
 
 Future<String> translateTextOnly(String text,
     {TranslateService? service, String? contextText}) async {
-  service ??= Prefs().translateService;
+  // Settings UI has been simplified to AI-only translation.
+  service ??= TranslateService.ai;
   final from = Prefs().translateFrom;
   final to = Prefs().translateTo;
 

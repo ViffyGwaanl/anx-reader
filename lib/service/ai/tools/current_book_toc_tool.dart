@@ -5,7 +5,7 @@ import 'package:anx_reader/models/toc_item.dart';
 import 'package:anx_reader/providers/book_toc.dart';
 import 'package:anx_reader/providers/current_reading.dart';
 import 'package:anx_reader/service/ai/tools/ai_tool_registry.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod/riverpod.dart';
 
 import 'base_tool.dart';
 
@@ -22,7 +22,7 @@ class CurrentBookTocTool extends RepositoryTool<JsonMap, Map<String, dynamic>> {
           timeout: const Duration(seconds: 2),
         );
 
-  final WidgetRef _ref;
+  final Ref _ref;
 
   @override
   JsonMap parseInput(Map<String, dynamic> json) {

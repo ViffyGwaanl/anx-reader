@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:anx_reader/l10n/generated/L10n.dart';
 import 'package:anx_reader/service/ai/tools/ai_tool_registry.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod/riverpod.dart';
 
 import 'base_tool.dart';
 import 'repository/chapter_content_repository.dart';
@@ -23,7 +23,7 @@ class CurrentChapterContentTool
           timeout: const Duration(seconds: 4),
         );
 
-  final WidgetRef _ref;
+  final Ref _ref;
   final ChapterContentRepository _repository;
 
   @override
